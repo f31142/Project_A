@@ -2,6 +2,7 @@ from io import BytesIO
 from pathlib import Path
 
 import altair as alt
+import numpy as np
 import streamlit as st
 from PIL import Image
 
@@ -218,6 +219,7 @@ if "viewer_case_id" in st.session_state:
 
     caption = f"모의 CT · {viewer_id} · {slice_number}번 단면"
     uploaded_image = uploaded_slices.get(slice_number)
+    original_bytes = uploaded_image
     file_name = case_images.get(slice_number)
 
     if uploaded_image is not None:
@@ -226,6 +228,7 @@ if "viewer_case_id" in st.session_state:
         image_path = Path(__file__).parent / "assets" / "mock_ct" / file_name
 
         if image_path.is_file():
+            original_bytes = image_path.read_bytes()
             image_column, controls_column = st.columns([3, 1])
             overlay_path = image_path.with_name(f"{image_path.stem}_overlay.png")
             if overlay_path.is_file():
@@ -246,6 +249,32 @@ if "viewer_case_id" in st.session_state:
         st.info(f"{viewer_id}의 {available_slices}번 단면에서 모의 CT를 볼 수 있어요.")
     else:
         st.info("현재 단면에 표시할 영상이 없어요.")
+
+    if original_bytes is not None:
+        compare_enabled = st.toggle(
+            "원본·밝기 보정 비교",
+            key=f"compare_brightness_{viewer_id}",
+        )
+
+        if compare_enabled:
+            factor = st.slider(
+                "밝기 배율",
+                min_value=0.5,
+                max_value=2.0,
+                value=1.0,
+                step=0.1,
+                key=f"brightness_{viewer_id}",
+            )
+
+            with Image.open(BytesIO(original_bytes)) as image:
+                original = np.array(image.convert("RGB"))
+
+            scaled = original.astype(np.float32) * factor
+            result = np.clip(scaled, 0, 255).astype(np.uint8)
+
+            original_column, result_column = st.columns(2)
+            original_column.image(original, caption="원본", width="stretch")
+            result_column.image(result, caption="밝기 보정 결과", width="stretch")
 
     st.divider()
     st.subheader("검토 메모")
