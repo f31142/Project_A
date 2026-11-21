@@ -1,6 +1,9 @@
-import streamlit as st
+from io import BytesIO
 from pathlib import Path
+
 import altair as alt
+import streamlit as st
+from PIL import Image
 
 st.title("간 CT 검토실")
 
@@ -191,9 +194,35 @@ if "viewer_case_id" in st.session_state:
         area_column.metric("현재 단면 모의 면적", area_text)
         volume_column.metric("모의 전체 종양 부피", f"{measurement['volume_ml']:.1f} mL")
 
+    uploads_by_case = st.session_state.setdefault("uploaded_ct_images", {})
+    uploaded_slices = uploads_by_case.setdefault(viewer_id, {})
+
+    with st.popover("현재 단면에 PNG 첨부"):
+        with st.form(f"attach_ct_{viewer_id}_{slice_number}", clear_on_submit=True):
+            png_file = st.file_uploader("모의 CT PNG", type=["png"])
+            attach_clicked = st.form_submit_button("첨부")
+
+        if attach_clicked:
+            if png_file is None:
+                st.warning("첨부할 PNG를 선택해 주세요.")
+            else:
+                image_bytes = png_file.getvalue()
+                try:
+                    with Image.open(BytesIO(image_bytes), formats=("PNG",)) as image:
+                        image.load()
+                except (OSError, SyntaxError, Image.DecompressionBombError):
+                    st.error("이미지를 읽을 수 없어요. 정상적인 PNG 파일을 선택해 주세요.")
+                else:
+                    uploaded_slices[slice_number] = image_bytes
+                    st.success(f"{viewer_id}의 {slice_number}번 단면에 PNG를 첨부했어요.")
+
+    caption = f"모의 CT · {viewer_id} · {slice_number}번 단면"
+    uploaded_image = uploaded_slices.get(slice_number)
     file_name = case_images.get(slice_number)
 
-    if file_name:
+    if uploaded_image is not None:
+        st.image(uploaded_image, caption=f"첨부한 {caption}", width="stretch")
+    elif file_name:
         image_path = Path(__file__).parent / "assets" / "mock_ct" / file_name
 
         if image_path.is_file():
@@ -206,7 +235,7 @@ if "viewer_case_id" in st.session_state:
 
             image_column.image(
                 str(image_path),
-                caption=f"모의 CT · {viewer_id} · {slice_number}번 단면",
+                caption=caption,
                 width="stretch",
             )
         else:
@@ -216,7 +245,7 @@ if "viewer_case_id" in st.session_state:
         available_slices = "·".join(str(number) for number in sorted(case_images))
         st.info(f"{viewer_id}의 {available_slices}번 단면에서 모의 CT를 볼 수 있어요.")
     else:
-        st.info("이 케이스에 등록된 영상이 없어요.")
+        st.info("현재 단면에 표시할 영상이 없어요.")
 
     st.divider()
     st.subheader("검토 메모")
