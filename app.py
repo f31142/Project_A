@@ -25,6 +25,13 @@ mock_measurements = {
     },
 }
 
+review_statuses = st.session_state.setdefault("review_statuses", {})
+
+
+def set_review_status(case_id, status):
+    st.session_state["review_statuses"][case_id] = status
+
+
 left, right = st.columns(2)
 selected_id = left.selectbox("케이스 선택", list(cases))
 selected_case = cases[selected_id]
@@ -33,6 +40,8 @@ right.subheader("케이스 상세")
 right.write(f"케이스 ID: {selected_id}")
 right.write(f"검사 종류: {selected_case['exam']}")
 right.write(f"단면 수: {selected_case['slice_count']}장")
+selected_status = review_statuses.get(selected_id, "검토 대기")
+right.write(f"검토 상태: {selected_status}")
 
 if right.button("뷰어 열기"):
     st.session_state["viewer_case_id"] = selected_id
@@ -44,6 +53,24 @@ if "viewer_case_id" in st.session_state:
 
     st.divider()
     st.subheader(f"{viewer_id} 단면 뷰어")
+
+    viewer_status = review_statuses.get(viewer_id, "검토 대기")
+    status_column, status_actions = st.columns([2, 1])
+    status_column.write(f"검토 상태: {viewer_status}")
+    if viewer_status == "검토 대기":
+        status_actions.button(
+            "검토 시작",
+            key=f"start_review_{viewer_id}",
+            on_click=set_review_status,
+            args=(viewer_id, "검토 중"),
+        )
+    elif viewer_status == "검토 중":
+        status_actions.button(
+            "검토 완료",
+            key=f"complete_review_{viewer_id}",
+            on_click=set_review_status,
+            args=(viewer_id, "검토 완료"),
+        )
 
     if st.button("예시 단면 41번으로 이동"):
         st.session_state[slice_key] = 41
