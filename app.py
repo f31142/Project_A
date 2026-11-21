@@ -1,5 +1,6 @@
 import streamlit as st
 from pathlib import Path
+import altair as alt
 
 st.title("간 CT 검토실")
 
@@ -39,6 +40,42 @@ if "viewer_case_id" in st.session_state:
 
     if st.button("예시 단면 41번으로 이동"):
         st.session_state[slice_key] = 41
+
+    if viewer_id == "HCC_004":
+        measurements = [
+            {"slice_number": 34, "area_cm2": 29.6},
+            {"slice_number": 41, "area_cm2": 31.9},
+            {"slice_number": 50, "area_cm2": 15.7},
+        ]
+        current_slice = st.session_state.get(slice_key, 1)
+        chart_key = f"area_chart_{current_slice}"
+
+        def move_to_selected_slice():
+            chart_selection = st.session_state[chart_key]["selection"]
+            points = chart_selection.get("area_point", [])
+            if points:
+                st.session_state[slice_key] = int(points[0]["slice_number"])
+
+        point_selection = alt.selection_point(
+            name="area_point",
+            fields=["slice_number"],
+            on="click",
+            toggle=False,
+        )
+
+        chart = (
+            alt.Chart(alt.Data(values=measurements))
+            .mark_circle(size=155, color="#176C67", opacity=1, cursor="pointer")
+            .encode(
+                x=alt.X("slice_number:Q", title="CT 단면 번호", scale=alt.Scale(zero=False)),
+                y=alt.Y("area_cm2:Q", title="종양 면적 (cm²)"),
+                tooltip=["slice_number:Q", "area_cm2:Q"],
+            )
+            .add_params(point_selection)
+        )
+
+        st.subheader("단면별 모의 종양 면적")
+        st.altair_chart(chart, key=chart_key, on_select=move_to_selected_slice)
 
     slice_number = st.slider(
         "단면 번호",
