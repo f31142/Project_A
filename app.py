@@ -126,3 +126,25 @@ if "viewer_case_id" in st.session_state:
 
     else:
         st.info("HCC_004의 34·41·50번 단면에서 모의 CT를 볼 수 있어요.")
+
+
+        st.divider()
+    st.subheader("검토 메모")
+
+    notes_by_case = st.session_state.setdefault("review_notes", {})
+    case_notes = notes_by_case.setdefault(viewer_id, [])
+
+    with st.form(f"review_note_{viewer_id}", clear_on_submit=True):
+        note = st.text_area("메모 내용")
+        submitted = st.form_submit_button("메모 저장")
+
+    if submitted:
+        note = note.strip()
+        if note:
+            case_notes.append({"slice_number": slice_number, "text": note})
+            st.success("메모를 저장했어요.")
+        else:
+            st.warning("메모 내용을 입력해 주세요.")
+
+    for saved_note in reversed(case_notes):
+        st.text(f"{saved_note['slice_number']}번 단면 · {saved_note['text']}")
