@@ -32,19 +32,53 @@ def set_review_status(case_id, status):
     st.session_state["review_statuses"][case_id] = status
 
 
-left, right = st.columns(2)
-selected_id = left.selectbox("케이스 선택", list(cases))
-selected_case = cases[selected_id]
+left, right = st.columns([2, 1])
+left.subheader("케이스 목록")
+query = left.text_input("케이스 ID 검색", placeholder="예: 012").strip().casefold()
+status_filter = left.selectbox(
+    "검토 상태 필터",
+    ["전체", "검토 대기", "검토 중", "검토 완료"],
+)
 
-right.subheader("케이스 상세")
-right.write(f"케이스 ID: {selected_id}")
-right.write(f"검사 종류: {selected_case['exam']}")
-right.write(f"단면 수: {selected_case['slice_count']}장")
-selected_status = review_statuses.get(selected_id, "검토 대기")
-right.write(f"검토 상태: {selected_status}")
+rows = []
+for case_id, case in cases.items():
+    status = review_statuses.get(case_id, "검토 대기")
+    matches_id = query in case_id.casefold()
+    matches_status = status_filter == "전체" or status == status_filter
 
-if right.button("뷰어 열기"):
-    st.session_state["viewer_case_id"] = selected_id
+    if matches_id and matches_status:
+        rows.append({
+            "케이스 ID": case_id,
+            "검사 종류": case["exam"],
+            "단면 수": case["slice_count"],
+            "검토 상태": status,
+        })
+
+if rows:
+    table_key = "case_table_" + "_".join(row["케이스 ID"] for row in rows)
+    event = left.dataframe(
+        rows,
+        key=table_key,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+    )
+
+    selected_rows = event.selection.rows
+    selected_index = selected_rows[0] if selected_rows else 0
+    selected_case = rows[selected_index]
+    selected_id = selected_case["케이스 ID"]
+
+    right.subheader("케이스 상세")
+    right.write(f"케이스 ID: {selected_id}")
+    right.write(f"검사 종류: {selected_case['검사 종류']}")
+    right.write(f"단면 수: {selected_case['단면 수']}장")
+    right.write(f"검토 상태: {selected_case['검토 상태']}")
+
+    if right.button("뷰어 열기"):
+        st.session_state["viewer_case_id"] = selected_id
+else:
+    left.info("검색 조건에 맞는 케이스가 없어요.")
 
 if "viewer_case_id" in st.session_state:
     viewer_id = st.session_state["viewer_case_id"]
