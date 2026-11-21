@@ -252,29 +252,56 @@ if "viewer_case_id" in st.session_state:
 
     if original_bytes is not None:
         compare_enabled = st.toggle(
-            "원본·밝기 보정 비교",
-            key=f"compare_brightness_{viewer_id}",
+            "원본·처리 결과 비교",
+            key=f"compare_processing_{viewer_id}",
         )
 
         if compare_enabled:
-            factor = st.slider(
-                "밝기 배율",
-                min_value=0.5,
-                max_value=2.0,
-                value=1.0,
-                step=0.1,
-                key=f"brightness_{viewer_id}",
+            method = st.selectbox(
+                "영상처리 도구",
+                [
+                    "밝기 보정",
+                    "CLAHE 대비 보정",
+                    "가우시안 노이즈 완화",
+                    "Canny 경계 검출",
+                ],
+                key=f"processing_method_{viewer_id}",
             )
 
             with Image.open(BytesIO(original_bytes)) as image:
                 original = np.array(image.convert("RGB"))
 
-            scaled = original.astype(np.float32) * factor
-            result = np.clip(scaled, 0, 255).astype(np.uint8)
+            result = None
+
+            if method == "밝기 보정":
+                factor = st.slider(
+                    "밝기 배율",
+                    min_value=0.5,
+                    max_value=2.0,
+                    value=1.0,
+                    step=0.1,
+                    key=f"brightness_{viewer_id}",
+                )
+                scaled = original.astype(np.float32) * factor
+                result = np.clip(scaled, 0, 255).astype(np.uint8)
+
+            elif method == "CLAHE 대비 보정":
+                st.slider("대비 제한값", 1.0, 5.0, 2.0, 0.1)
+                st.select_slider("가로·세로 타일 수", options=[4, 8, 16], value=8)
+
+            elif method == "가우시안 노이즈 완화":
+                st.select_slider("커널 크기", options=[3, 5, 7, 9], value=5)
+
+            elif method == "Canny 경계 검출":
+                st.slider("경계 임계값", 0, 255, (50, 150))
 
             original_column, result_column = st.columns(2)
             original_column.image(original, caption="원본", width="stretch")
-            result_column.image(result, caption="밝기 보정 결과", width="stretch")
+
+            if result is None:
+                result_column.info("처리 함수를 연결한 뒤 결과가 표시돼요.")
+            else:
+                result_column.image(result, caption=f"{method} 결과", width="stretch")
 
     st.divider()
     st.subheader("검토 메모")
