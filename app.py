@@ -18,6 +18,13 @@ mock_ct_images = {
     },
 }
 
+mock_measurements = {
+    "HCC_004": {
+        "areas_cm2": {34: 29.6, 41: 31.9, 50: 15.7},
+        "volume_ml": 154.8,
+    },
+}
+
 left, right = st.columns(2)
 selected_id = left.selectbox("케이스 선택", list(cases))
 selected_case = cases[selected_id]
@@ -41,14 +48,14 @@ if "viewer_case_id" in st.session_state:
     if st.button("예시 단면 41번으로 이동"):
         st.session_state[slice_key] = 41
 
-    if viewer_id == "HCC_004":
+    measurement = mock_measurements.get(viewer_id)
+    if measurement is not None:
         measurements = [
-            {"slice_number": 34, "area_cm2": 29.6},
-            {"slice_number": 41, "area_cm2": 31.9},
-            {"slice_number": 50, "area_cm2": 15.7},
+            {"slice_number": number, "area_cm2": area}
+            for number, area in measurement["areas_cm2"].items()
         ]
         current_slice = st.session_state.get(slice_key, 1)
-        chart_key = f"area_chart_{current_slice}"
+        chart_key = f"area_chart_{viewer_id}_{current_slice}"
 
         def move_to_selected_slice():
             chart_selection = st.session_state[chart_key]["selection"]
@@ -84,6 +91,17 @@ if "viewer_case_id" in st.session_state:
         key=slice_key,
     )
     st.write(f"현재 단면: {slice_number} / {total_slices}")
+
+    if measurement is not None:
+        current_area = measurement["areas_cm2"].get(slice_number)
+        area_text = "측정값 없음"
+        if current_area is not None:
+            area_text = f"{current_area:.1f} cm²"
+
+        area_column, volume_column = st.columns(2)
+        area_column.metric("현재 단면 모의 면적", area_text)
+        volume_column.metric("모의 전체 종양 부피", f"{measurement['volume_ml']:.1f} mL")
+
     case_images = mock_ct_images.get(viewer_id, {})
     file_name = case_images.get(slice_number)
 
