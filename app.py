@@ -54,10 +54,20 @@ if "viewer_case_id" in st.session_state:
         image_path = Path(__file__).parent / "assets" / "mock_ct" / file_name
 
         if image_path.is_file():
-            st.image(str(image_path), caption=f"{viewer_id} · {slice_number}번 단면")
+            image_column, controls_column = st.columns([3, 1])
+            overlay_path = image_path.with_name(f"{image_path.stem}_overlay.png")
+            if overlay_path.is_file():
+                show_overlay = controls_column.toggle("종양 윤곽 표시")
+                if show_overlay:
+                    image_path = overlay_path
+
+            image_column.image(
+                str(image_path),
+                caption=f"모의 CT · {viewer_id} · {slice_number}번 단면",
+                width="stretch",
+            )
         else:
             st.info(f"표시할 이미지 파일: {file_name}")
 
     else:
-        st.info("모의 이미지는 HCC_004의 34·41·50번 단면에 준비해요.")
-    
+        st.info("HCC_004의 34·41·50번 단면에서 모의 CT를 볼 수 있어요.")
