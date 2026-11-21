@@ -1,4 +1,5 @@
 import streamlit as st
+from pathlib import Path
 
 st.title("간 CT 검토실")
 
@@ -6,6 +7,14 @@ cases = {
     "HCC_004": {"exam": "치료 전 CT", "slice_count": 79},
     "HCC_012": {"exam": "치료 후 CT", "slice_count": 86},
     "HCC_018": {"exam": "치료 전 CT", "slice_count": 72},
+}
+
+mock_ct_images = {
+    "HCC_004": {
+        34: "slice_034.png",
+        41: "slice_041.png",
+        50: "slice_050.png",
+    },
 }
 
 left, right = st.columns(2)
@@ -38,3 +47,17 @@ if "viewer_case_id" in st.session_state:
         key=slice_key,
     )
     st.write(f"현재 단면: {slice_number} / {total_slices}")
+    case_images = mock_ct_images.get(viewer_id, {})
+    file_name = case_images.get(slice_number)
+
+    if file_name:
+        image_path = Path(__file__).parent / "assets" / "mock_ct" / file_name
+
+        if image_path.is_file():
+            st.image(str(image_path), caption=f"{viewer_id} · {slice_number}번 단면")
+        else:
+            st.info(f"표시할 이미지 파일: {file_name}")
+
+    else:
+        st.info("모의 이미지는 HCC_004의 34·41·50번 단면에 준비해요.")
+    
