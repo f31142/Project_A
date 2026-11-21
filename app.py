@@ -1,10 +1,68 @@
+from base64 import b64encode
 from io import BytesIO
+from math import ceil, floor
 from pathlib import Path
 
 import altair as alt
 import numpy as np
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageDraw
+
+def select_roi_by_drag(source, key):
+    width, height = source.size
+    preview = source.copy()
+    preview.thumbnail((320, 320))
+    buffer = BytesIO()
+    preview.save(buffer, format="PNG")
+    image_url = "data:image/png;base64," + b64encode(buffer.getvalue()).decode("ascii")
+
+    brush = alt.selection_interval(
+        name="roi_box",
+        encodings=["x", "y"],
+        translate=False,
+        zoom=False,
+        mark=alt.BrushConfig(fill="#14B8A6", fillOpacity=0.19, stroke="#14B8A6"),
+    )
+    chart = (
+        alt.Chart(alt.Data(values=[{"x": width / 2, "y": height / 2, "url": image_url}]))
+        .mark_image(
+            width=alt.ExprRef(expr="width"),
+            height=alt.ExprRef(expr="height"),
+            aspect=False,
+        )
+        .encode(
+            x=alt.X("x:Q", axis=None, scale=alt.Scale(domain=[0, width], nice=False)),
+            y=alt.Y("y:Q", axis=None, scale=alt.Scale(domain=[height, 0], nice=False)),
+            url="url:N",
+        )
+        .properties(
+            width=preview.width,
+            height=preview.height,
+            padding=0,
+            autosize="none",
+        )
+        .add_params(brush)
+        .configure_view(stroke=None)
+    )
+
+    event = st.altair_chart(
+        chart,
+        key=f"roi_drag_{key}",
+        theme=None,
+        use_container_width=False,
+        on_select="rerun",
+    )
+    box = event.selection.get("roi_box", {})
+    if not box.get("x") or not box.get("y"):
+        return None
+
+    return (
+        max(0, floor(min(box["x"]))),
+        min(width, ceil(max(box["x"]))),
+        max(0, floor(min(box["y"]))),
+        min(height, ceil(max(box["y"]))),
+    )
+
 
 st.title("간 CT 검토실")
 
@@ -302,6 +360,64 @@ if "viewer_case_id" in st.session_state:
                 result_column.info("처리 함수를 연결한 뒤 결과가 표시돼요.")
             else:
                 result_column.image(result, caption=f"{method} 결과", width="stretch")
+
+    if original_bytes is not None and st.toggle(
+        "관심 영역(ROI) 분석",
+        key=f"show_roi_{viewer_id}",
+    ):
+        with Image.open(BytesIO(original_bytes)) as image:
+            source = image.convert("RGB")
+
+        gray = np.array(source.convert("L"))
+        height, width = gray.shape
+
+        roi_key = f"{viewer_id}_{slice_number}"
+        mode = st.radio(
+            "ROI 지정 방식",
+            ["영상에서 드래그", "좌표 슬라이더"],
+            horizontal=True,
+            key=f"roi_mode_{viewer_id}",
+        )
+        preview_column, stats_column = st.columns([3, 2])
+
+        if mode == "영상에서 드래그":
+            with preview_column:
+                bounds = select_roi_by_drag(source, roi_key)
+        else:
+            x0, x1 = preview_column.slider(
+                "가로 범위 (x)", 0, width, (width // 4, width - width // 4),
+                key=f"roi_x_{roi_key}",
+            )
+            y0, y1 = preview_column.slider(
+                "세로 범위 (y)", 0, height, (height // 4, height - height // 4),
+                key=f"roi_y_{roi_key}",
+            )
+            bounds = x0, x1, y0, y1
+
+        if bounds is None:
+            stats_column.info("CT 위에서 드래그해 관심 영역을 선택해 주세요.")
+        elif bounds[0] >= bounds[1] or bounds[2] >= bounds[3]:
+            stats_column.warning("가로와 세로 범위를 각각 한 픽셀 이상으로 골라 주세요.")
+        else:
+            x0, x1, y0, y1 = bounds
+            roi = gray[y0:y1, x0:x1]
+
+            if mode == "좌표 슬라이더":
+                preview = source.copy()
+                ImageDraw.Draw(preview).rectangle(
+                    (x0, y0, x1 - 1, y1 - 1), outline="#14B8A6", width=2,
+                )
+                preview_column.image(preview, caption="선택한 ROI", width="stretch")
+
+            stats_column.metric("ROI 평균 밝기", f"{roi.mean():.1f}")
+            stats_column.caption(
+                f"x {x0}–{x1 - 1} · y {y0}–{y1 - 1} · {x1 - x0} × {y1 - y0} 픽셀"
+            )
+            counts = np.bincount(roi.ravel(), minlength=256)
+            stats_column.bar_chart(
+                {"밝기": range(256), "픽셀 수": counts},
+                x="밝기", y="픽셀 수", x_label="픽셀 밝기 (0~255)",
+            )
 
     st.divider()
     st.subheader("검토 메모")
