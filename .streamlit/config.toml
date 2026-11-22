@@ -1,0 +1,39 @@
+# 간 CT 검토실 테마 — "Quiet Precision"
+# 잉크(#121917)는 조작, 민트·청록은 종양과 측정, 앰버는 검토 중을 뜻합니다.
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+base = "light"
+primaryColor = "#121917"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7F8F6"
+textColor = "#121917"
+linkColor = "#0B6E5B"
+borderColor = "#E2E6E1"
+dataframeBorderColor = "#E2E6E1"
+showWidgetBorder = true
+baseRadius = "10px"
+buttonRadius = "10px"
+baseFontSize = 15
+font = "'IBM Plex Sans KR':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap"
+codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+headingFontWeights = 600
+chartCategoricalColors = ["#10997D", "#121917", "#E5A50A", "#636D69"]
+
+greenColor = "#10997D"
+greenTextColor = "#0B6E5B"
+greenBackgroundColor = "#E6F5F0"
+yellowColor = "#E5A50A"
+yellowTextColor = "#8A5A00"
+yellowBackgroundColor = "#FCF3DC"
+orangeColor = "#E5A50A"
+orangeTextColor = "#8A5A00"
+orangeBackgroundColor = "#FCF3DC"
+redColor = "#B42318"
+redTextColor = "#B42318"
+redBackgroundColor = "#FDEDEB"
+blueColor = "#636D69"
+blueTextColor = "#47524E"
+blueBackgroundColor = "#EEF0ED"
