@@ -260,6 +260,21 @@
   padding: 24px;
 }
 
+[class*="st-key-card_"] [data-testid="stWidgetLabel"] p,
+[class*="st-key-card_"] [data-testid="stRadio"] [data-testid="stMarkdownContainer"] p,
+[class*="st-key-card_"] [data-testid="stSliderThumbValue"] {
+  color: var(--ink);
+}
+
+[class*="st-key-card_"] [data-testid="stCaptionContainer"] {
+  color: var(--ink-3);
+  opacity: 1;
+}
+
+[class*="st-key-card_"] [data-testid="stSliderTickBar"] span {
+  color: var(--ink-3);
+}
+
 @media (max-width: 640px) {
   [class*="st-key-card_"] { padding: 18px; }
 }
@@ -502,6 +517,14 @@
   gap: 4px;
 }
 
+.st-key-back_to_list button {
+  color: var(--ink);
+}
+
+.st-key-back_to_list button:is(:hover, :focus-visible) {
+  color: var(--teal-text);
+}
+
 .viewer-title-row {
   display: flex;
   align-items: center;
@@ -674,6 +697,18 @@
 
 /* ---------- 인스펙터 ---------- */
 
+.st-key-card_display [data-testid="stBaseButton-secondary"] {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.st-key-card_display [data-testid="stBaseButton-secondary"]:is(:hover, :focus-visible, :active) {
+  background: var(--teal-tint);
+  border-color: var(--teal-line);
+  color: var(--ink);
+}
+
 .st-key-contour_row [data-testid="stWidgetLabel"] p::before {
   content: "";
   display: inline-block;
@@ -746,21 +781,6 @@
 
 .section-desc {
   font-size: 13px;
-  color: var(--ink-3);
-}
-
-.st-key-card_processing [data-testid="stWidgetLabel"] p,
-.st-key-card_processing [data-testid="stRadio"] [data-testid="stMarkdownContainer"] p,
-.st-key-card_processing [data-testid="stSliderThumbValue"] {
-  color: var(--ink);
-}
-
-.st-key-card_processing [data-testid="stCaptionContainer"] {
-  color: var(--ink-3);
-  opacity: 1;
-}
-
-.st-key-card_processing [data-testid="stSliderTickBar"] span {
   color: var(--ink-3);
 }
 
