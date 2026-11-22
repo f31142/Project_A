@@ -749,6 +749,21 @@
   color: var(--ink-3);
 }
 
+.st-key-card_processing [data-testid="stWidgetLabel"] p,
+.st-key-card_processing [data-testid="stRadio"] [data-testid="stMarkdownContainer"] p,
+.st-key-card_processing [data-testid="stSliderThumbValue"] {
+  color: var(--ink);
+}
+
+.st-key-card_processing [data-testid="stCaptionContainer"] {
+  color: var(--ink-3);
+  opacity: 1;
+}
+
+.st-key-card_processing [data-testid="stSliderTickBar"] span {
+  color: var(--ink-3);
+}
+
 [class*="st-key-tile_"] {
   background: var(--stage);
   border-radius: 14px;

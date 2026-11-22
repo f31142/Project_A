@@ -13,7 +13,6 @@ textColor = "#121917"
 linkColor = "#0B6E5B"
 borderColor = "#E2E6E1"
 dataframeBorderColor = "#E2E6E1"
-dataframeHeaderBackgroundColor = "#F7F8F6"
 showWidgetBorder = true
 baseRadius = "10px"
 buttonRadius = "10px"

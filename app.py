@@ -27,9 +27,9 @@ MONO_FONT = "IBM Plex Mono"
 
 REVIEW_STATUSES = ["검토 대기", "검토 중", "검토 완료"]
 STATUS_STYLES = {
-    "검토 대기": ("waiting", "○", "#636D69"),
-    "검토 중": ("progress", "●", "#8A5A00"),
-    "검토 완료": ("done", "✓", "#121917"),
+    "검토 대기": ("waiting", "○"),
+    "검토 중": ("progress", "●"),
+    "검토 완료": ("done", "✓"),
 }
 PROCESSING_METHODS = [
     "밝기 보정",
@@ -326,16 +326,9 @@ def render_case_list():
 
         if rows:
             table_key = "case_table_" + "_".join(row["케이스 ID"] for row in rows)
-            table = (
-                pd.DataFrame(rows)
-                .style.map(
-                    lambda status: f"color: {STATUS_STYLES[status][2]}",
-                    subset=["검토 상태"],
-                )
-                .format(
-                    lambda status: f"{STATUS_STYLES[status][1]}  {status}",
-                    subset=["검토 상태"],
-                )
+            table = pd.DataFrame(rows).style.format(
+                lambda status: f"{STATUS_STYLES[status][1]}  {status}",
+                subset=["검토 상태"],
             )
             event = st.dataframe(
                 table,
