@@ -10,6 +10,8 @@ import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw
 
+from case_validation import DICOM_EXTENSIONS, validate_registration
+
 APP_DIR = Path(__file__).parent
 MOCK_CT_DIR = APP_DIR / "assets" / "mock_ct"
 
@@ -269,21 +271,33 @@ def render_case_list():
                 case_id_input = st.text_input("새 케이스 ID", placeholder="예: HCC_025")
                 exam_type = st.selectbox("검사 종류", ["치료 전 CT", "치료 후 CT"])
                 new_slice_count = st.number_input("단면 수", min_value=1, value=1)
+                dicom_files = st.file_uploader(
+                    "CT DICOM 파일",
+                    type=list(DICOM_EXTENSIONS),
+                    accept_multiple_files=True,
+                    help="한 시리즈의 .dcm 파일을 여러 개 함께 선택할 수 있어요.",
+                )
                 submitted = st.form_submit_button("등록", type="primary")
 
             if submitted:
-                new_case_id = case_id_input.strip().upper()
+                new_case_id, errors = validate_registration(case_id_input, cases, dicom_files)
 
-                if not new_case_id:
-                    st.warning("케이스 ID를 입력해 주세요.")
-                elif new_case_id in cases:
-                    st.warning("이미 등록된 케이스 ID예요.")
+                if errors:
+                    for error in errors:
+                        st.warning(error)
                 else:
+                    total_mb = sum(file.size for file in dicom_files) / (1024 * 1024)
                     cases[new_case_id] = {
                         "exam": exam_type,
                         "slice_count": new_slice_count,
                     }
-                    st.success(f"{new_case_id} 케이스를 등록했어요.")
+                    # 파일 선택과 기본 입력 검사까지만 끝난 상태: 영구 저장 성공으로 표시하지 않습니다.
+                    st.info(
+                        f"{new_case_id} 입력 검사를 통과했어요. "
+                        f"DICOM 파일 {len(dicom_files)}개 · {total_mb:.1f} MB를 선택했어요.\n\n"
+                        "아직 영구 저장은 연결되지 않아 파일은 저장되지 않았고, "
+                        "케이스는 이 세션의 목록에만 표시돼요."
+                    )
 
     list_col, detail_col = st.columns([2.3, 1], gap="large")
     selected_case = None

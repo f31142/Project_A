@@ -1,0 +1,13 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 비밀 설정: Firebase 서비스 계정 키 등은 저장소에 넣지 않습니다
+.streamlit/secrets.toml
+*serviceAccount*.json
+
+# OS
+.DS_Store
