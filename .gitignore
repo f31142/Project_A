@@ -11,3 +11,6 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# 업로드한 CT 원본 (로컬 개발용 저장 폴더)
+data/

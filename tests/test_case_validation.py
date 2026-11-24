@@ -3,11 +3,14 @@ from dataclasses import dataclass
 import pytest
 
 from case_validation import (
+    MSG_CASE_ID_FORMAT,
+    MSG_CASE_ID_TOO_LONG,
     MSG_DUPLICATE_CASE_ID,
     MSG_EMPTY_CASE_ID,
     MSG_NO_FILES,
     normalize_case_id,
     validate_case_id,
+    validate_case_id_format,
     validate_dicom_selection,
     validate_registration,
 )
@@ -122,6 +125,22 @@ def test_registration_reports_id_and_file_errors_together():
     case_id, errors = validate_registration("  ", EXISTING, [])
     assert case_id == ""
     assert errors == [MSG_EMPTY_CASE_ID, MSG_NO_FILES]
+
+
+@pytest.mark.parametrize("raw", ["HCC/025", "../X", "HCC 025", "_HCC", "-1", "간암_01", "HCC.025"])
+def test_case_id_with_unsafe_characters_is_rejected(raw):
+    case_id, errors = validate_registration(raw, EXISTING, [FakeUpload("1-001.dcm", 10)])
+    assert errors == [MSG_CASE_ID_FORMAT]
+
+
+@pytest.mark.parametrize("raw", ["HCC_025", "hcc-025", "A", "2024_LIVER_01"])
+def test_case_id_with_allowed_characters_is_accepted(raw):
+    assert validate_case_id_format(normalize_case_id(raw)) == []
+
+
+def test_case_id_too_long_is_rejected():
+    assert validate_case_id("A" * 41, EXISTING) == [MSG_CASE_ID_TOO_LONG]
+    assert validate_case_id("A" * 40, EXISTING) == []
 
 
 def test_existing_ids_can_be_a_dict():

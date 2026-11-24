@@ -1,17 +1,23 @@
 """케이스 등록 폼의 기본 입력 검사.
 
 Streamlit에 의존하지 않는 순수 함수만 두어 pytest로 바로 검사할 수 있게 합니다.
-이 단계에서는 케이스 ID와 선택한 파일의 기본 조건(개수·크기·확장자)만 확인합니다.
-DICOM 내용·시리즈 검증과 영구 저장(Firebase)은 다음 단계에서 연결합니다.
+케이스 ID(빈 값·형식·중복)와 선택한 파일의 기본 조건(개수·크기·확장자)을 확인합니다.
+DICOM 내용·시리즈 검증은 다음 단계(B 담당 검사 함수)에서 연결합니다.
 """
 
+import re
 from pathlib import PurePath
 
 DICOM_EXTENSIONS = ("dcm",)
 MAX_LISTED_NAMES = 5
+CASE_ID_MAX_LENGTH = 40
+# Firestore 문서 ID와 저장 폴더 이름으로 그대로 쓸 수 있는 문자만 허용합니다.
+CASE_ID_PATTERN = re.compile(r"[A-Z0-9][A-Z0-9_-]*")
 
 MSG_EMPTY_CASE_ID = "케이스 ID를 입력해 주세요."
 MSG_DUPLICATE_CASE_ID = "이미 등록된 케이스 ID예요."
+MSG_CASE_ID_FORMAT = "케이스 ID는 영문·숫자로 시작하고 영문·숫자·_·-만 쓸 수 있어요. (예: HCC_025)"
+MSG_CASE_ID_TOO_LONG = f"케이스 ID는 {CASE_ID_MAX_LENGTH}자 이하로 입력해 주세요."
 MSG_NO_FILES = "DICOM 파일을 하나 이상 선택해 주세요."
 
 
@@ -20,10 +26,24 @@ def normalize_case_id(raw_case_id):
     return (raw_case_id or "").strip().upper()
 
 
+def validate_case_id_format(case_id):
+    """정규화된 케이스 ID의 형식만 검사합니다. 빈 값은 따로 검사하므로 여기서는 통과시킵니다."""
+    if not case_id:
+        return []
+    if len(case_id) > CASE_ID_MAX_LENGTH:
+        return [MSG_CASE_ID_TOO_LONG]
+    if not CASE_ID_PATTERN.fullmatch(case_id):
+        return [MSG_CASE_ID_FORMAT]
+    return []
+
+
 def validate_case_id(case_id, existing_case_ids):
-    """정규화된 케이스 ID의 빈 값·중복을 검사하고 오류 문구 목록을 돌려줍니다."""
+    """정규화된 케이스 ID의 빈 값·형식·중복을 검사하고 오류 문구 목록을 돌려줍니다."""
     if not case_id:
         return [MSG_EMPTY_CASE_ID]
+    format_errors = validate_case_id_format(case_id)
+    if format_errors:
+        return format_errors
     if case_id in existing_case_ids:
         return [MSG_DUPLICATE_CASE_ID]
     return []
