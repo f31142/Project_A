@@ -59,6 +59,16 @@ class DicomCTTests(unittest.TestCase):
         self.assertEqual([item.position_mm for item in slices], [0, 2.5, 5])
         self.assertEqual(slices[0].pixel_spacing_mm, (0.625, 0.625))
 
+    def test_reads_the_series_uid_when_no_expected_uid_is_given(self):
+        self.write_slice("001.dcm", 0)
+        self.write_slice("002.dcm", 2.5)
+
+        slices = load_ct_series(self.directory)
+
+        self.assertIsInstance(slices, tuple)
+        self.assertEqual(len(slices), 2)
+        self.assertEqual(slices[0].series_instance_uid, self.series_uid)
+
     def test_rejects_slice_from_another_series(self):
         self.write_slice("001.dcm", 0)
         self.write_slice("002.dcm", 2.5, series_uid=generate_uid())
