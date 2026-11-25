@@ -36,6 +36,7 @@ from case_store import (
     register_case,
 )
 from case_validation import DICOM_EXTENSIONS, validate_registration
+from dicom_ct import load_ct_series  # B 담당: CT 시리즈 읽기·검사
 
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_STORAGE_ROOT = APP_DIR / "data" / "uploads"
@@ -81,6 +82,16 @@ def _connect():
         return _firestore_repository(), storage, None
     except Exception as error:  # 잘못된 키·네트워크 오류를 화면에 알립니다.
         return None, storage, f"Firestore에 연결하지 못했어요: {error}"
+
+
+def inspect_ct_series(folder):
+    """등록 직전에 저장한 폴더를 뷰어(B)와 같은 방법으로 읽어 봅니다.
+
+    한 CT 시리즈가 아니면 DicomReadError(ValueError)가 나고 등록이 취소됩니다.
+    성공하면 뷰어가 같은 시리즈를 다시 찾을 수 있게 (series_uid, 실제 단면 수)를 돌려줍니다.
+    """
+    slices = load_ct_series(folder)
+    return slices[0].series_instance_uid, len(slices)
 
 
 def _with_server_path(case, storage):
@@ -161,8 +172,11 @@ def render_register_form(cases):
         return
 
     try:
-        with st.spinner("CT 파일을 저장하고 있어요…"):
-            saved = register_case(repository, storage, new_case_id, exam_type, dicom_files)
+        with st.spinner("CT 파일을 저장하고 시리즈를 확인하고 있어요…"):
+            saved = register_case(
+                repository, storage, new_case_id, exam_type, dicom_files,
+                inspect_series=inspect_ct_series,
+            )
     except CaseAlreadyExistsError as error:
         st.warning(str(error))
         return
@@ -175,7 +189,10 @@ def render_register_form(cases):
 
     cases[new_case_id] = _with_server_path(case_record(new_case_id, saved, SOURCE_STORED), storage)
     total_mb = saved["total_bytes"] / (1024 * 1024)
-    summary = f"CT 파일 {saved['file_count']}개 · {total_mb:.1f} MB를 서버 디스크에 저장했어요."
+    summary = (
+        f"CT 단면 {saved['slice_count']}장(파일 {saved['file_count']}개 · {total_mb:.1f} MB)을 "
+        "확인하고 서버 디스크에 저장했어요."
+    )
     if repository.is_persistent:
         st.success(f"{new_case_id} 케이스를 등록했어요. {summary} 케이스 정보는 Firestore에 기록했어요.")
     else:

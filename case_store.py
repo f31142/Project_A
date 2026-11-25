@@ -212,11 +212,14 @@ def make_firestore_repository(service_account_info):
 # ---------------------------------------------------------------------------
 
 
-def register_case(repository, storage, case_id, exam_type, files, created_by=None):
-    """파일 저장 → 문서 생성 순서로 케이스를 등록합니다.
+def register_case(repository, storage, case_id, exam_type, files, created_by=None, inspect_series=None):
+    """파일 저장 → 시리즈 검사 → 문서 생성 순서로 케이스를 등록합니다.
 
     입력 검사(case_validation)는 호출 전에 끝났다고 가정합니다.
-    단면 수는 사람이 입력하지 않고 업로드한 DICOM 파일 수로 정합니다(파일 1개 = 단면 1장).
+    inspect_series(폴더 Path) -> (series_uid, slice_count):
+        저장한 폴더를 열어 한 CT 시리즈인지 확인합니다. 화면에서는 B 담당의 dicom_ct.load_ct_series를 씁니다.
+        ValueError(DicomReadError 포함)를 올리면 이번 업로드를 지우고 그 문구로 등록을 취소합니다.
+        없으면 시리즈 UID 없이 파일 수를 단면 수로 기록합니다(테스트·DICOM 없는 환경용).
     문서 쓰기가 확정 실패(중복·거절)일 때만 이번 업로드 폴더를 지우고, 결과 불명이면 파일을 보존합니다.
     """
     files = list(files)
@@ -235,6 +238,19 @@ def register_case(repository, storage, case_id, exam_type, files, created_by=Non
     }
     image_ref = storage.save_upload(case_id, files)
     data["image_ref"] = image_ref
+
+    if inspect_series is not None:
+        # 아직 문서를 쓰기 전이라, 여기서 실패하면 업로드를 지워도 가리키는 문서가 없습니다.
+        try:
+            series_uid, slice_count = inspect_series(storage.path_for(image_ref))
+        except ValueError as error:
+            note = _discard_upload(storage, image_ref)
+            raise CaseStoreError(f"올바른 CT 시리즈가 아니라 등록을 취소했어요. {error}{note}") from error
+        except Exception as error:
+            note = _discard_upload(storage, image_ref)
+            raise CaseStoreError(f"CT 시리즈를 확인하지 못해 등록을 취소했어요. ({error}){note}") from error
+        data["series_uid"] = series_uid
+        data["slice_count"] = slice_count
 
     # 파일 정리 원칙: 쓰기가 "확정 실패"일 때만 이번 업로드를 지웁니다.
     # 타임아웃처럼 결과를 알 수 없는 오류는 쓰기가 늦게 반영될 수 있으므로 파일을 보존합니다.
