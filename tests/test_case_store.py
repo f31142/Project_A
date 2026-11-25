@@ -349,3 +349,58 @@ def test_firestore_list_is_cached_and_invalidated_on_create():
     repo.create("HCC_025", {"exam_type": "치료 전 CT"})
     assert "HCC_025" in repo.list_cases()
     assert collection.stream_calls == 2  # 생성 후에는 다시 읽음
+
+
+def test_firestore_invalidate_cache_forces_fresh_read():
+    """다른 인스턴스(다른 사용자)가 등록한 케이스는 새로고침 버튼으로 바로 보입니다."""
+    client = FakeClient()
+    repo = FirestoreCaseRepository(client, ttl_seconds=60)
+    collection = client.collection("cases")
+
+    assert repo.list_cases() == {}
+    collection.store["HCC_030"] = {"exam_type": "치료 후 CT"}  # 다른 곳에서 등록됨
+    assert repo.list_cases() == {}  # 캐시가 살아 있는 동안은 아직 안 보임
+
+    repo.invalidate_cache()
+    assert "HCC_030" in repo.list_cases()
+
+
+def test_firestore_stale_read_is_not_cached_after_invalidation():
+    """목록을 읽는 도중 캐시가 비워지면, 그 읽기 결과(오래된 목록)는 캐시에 남기지 않습니다."""
+    client = FakeClient()
+    repo = FirestoreCaseRepository(client, ttl_seconds=60)
+    collection = client.collection("cases")
+    original_stream = collection.stream
+
+    def stream_then_register_elsewhere():
+        snapshots = original_stream()
+        repo.create("HCC_031", {"exam_type": "치료 전 CT"})  # 읽는 사이에 새 등록
+        return snapshots
+
+    collection.stream = stream_then_register_elsewhere
+    assert "HCC_031" not in repo.list_cases()
+
+    collection.stream = original_stream
+    assert "HCC_031" in repo.list_cases()
+
+
+def test_in_memory_invalidate_cache_is_harmless():
+    repo = InMemoryCaseRepository()
+    repo.create("HCC_025", {})
+    repo.invalidate_cache()
+    assert "HCC_025" in repo.list_cases()
+
+
+def test_path_for_points_to_saved_upload_folder(tmp_path):
+    storage = LocalFileStorage(tmp_path)
+    image_ref = storage.save_upload("HCC_025", uploads(3))
+
+    folder = storage.path_for(image_ref)
+    assert folder.is_absolute()
+    assert sorted(path.name for path in folder.iterdir()) == ["0001.dcm", "0002.dcm", "0003.dcm"]
+    assert (folder / "0002.dcm").read_bytes() == b"dicom-2"
+
+
+def test_path_for_refuses_paths_outside_root(tmp_path):
+    with pytest.raises(ValueError, match="저장소 밖"):
+        LocalFileStorage(tmp_path / "root").path_for("../elsewhere")

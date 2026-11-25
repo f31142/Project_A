@@ -86,6 +86,13 @@ class LocalFileStorage:
     def exists(self, image_ref):
         return self._resolve(image_ref).is_dir()
 
+    def path_for(self, image_ref):
+        """image_ref(저장 폴더 기준 상대 경로)를 서버의 실제 폴더 경로로 바꿉니다.
+
+        뷰어(B 담당)는 이 폴더를 그대로 열어 DICOM 시리즈를 읽습니다. 저장소 밖 경로는 거절합니다.
+        """
+        return self._resolve(image_ref)
+
 
 # ---------------------------------------------------------------------------
 # 메타데이터 저장소: Firestore / 메모리(테스트·미연결용)
@@ -114,6 +121,9 @@ class InMemoryCaseRepository:
     def list_cases(self):
         return {case_id: dict(doc) for case_id, doc in self._docs.items()}
 
+    def invalidate_cache(self):
+        """캐시가 없으므로 할 일이 없습니다. Firestore 저장소와 같은 사용법을 맞추려고 둡니다."""
+
 
 class FirestoreCaseRepository:
     """Cloud Firestore `cases` 컬렉션.
@@ -129,6 +139,8 @@ class FirestoreCaseRepository:
         self._ttl = ttl_seconds
         self._cache = None
         self._cached_at = 0.0
+        # 캐시를 비울 때마다 올립니다. 읽는 도중 비워졌다면 그 (오래된) 결과는 캐시에 넣지 않습니다.
+        self._generation = 0
         self._lock = threading.Lock()
 
     def create(self, case_id, data):
@@ -156,8 +168,7 @@ class FirestoreCaseRepository:
         except definite_rejections as error:
             raise CaseWriteRejectedError(str(error)) from error
         finally:
-            with self._lock:
-                self._cache = None
+            self.invalidate_cache()
 
     def get(self, case_id):
         """캐시를 거치지 않고 서버에서 문서를 직접 읽습니다. 없으면 None."""
@@ -168,11 +179,19 @@ class FirestoreCaseRepository:
         with self._lock:
             if self._cache is not None and time.monotonic() - self._cached_at < self._ttl:
                 return dict(self._cache)
+            generation = self._generation
         cases = {snapshot.id: snapshot.to_dict() for snapshot in self._collection.stream()}
         with self._lock:
-            self._cache = cases
-            self._cached_at = time.monotonic()
+            if generation == self._generation:
+                self._cache = cases
+                self._cached_at = time.monotonic()
         return dict(cases)
+
+    def invalidate_cache(self):
+        """다음 list_cases()가 서버에서 다시 읽게 합니다. (다른 사람이 등록한 케이스를 바로 확인할 때)"""
+        with self._lock:
+            self._cache = None
+            self._generation += 1
 
 
 def make_firestore_repository(service_account_info):

@@ -1,4 +1,3 @@
-import os
 from base64 import b64encode
 from html import escape
 from io import BytesIO
@@ -11,19 +10,8 @@ import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw
 
-from case_store import (
-    CaseAlreadyExistsError,
-    CaseStoreError,
-    InMemoryCaseRepository,
-    LocalFileStorage,
-    make_firestore_repository,
-    register_case,
-)
-from case_validation import DICOM_EXTENSIONS, validate_registration
-
 APP_DIR = Path(__file__).parent
 MOCK_CT_DIR = APP_DIR / "assets" / "mock_ct"
-DEFAULT_STORAGE_ROOT = APP_DIR / "data" / "uploads"
 
 INK = "#121917"
 INK_3 = "#636D69"
@@ -142,57 +130,7 @@ initial_cases = {
     "HCC_018": {"exam": "치료 전 CT", "slice_count": 72},
 }
 
-def read_secret_section(name):
-    try:
-        return dict(st.secrets[name]) if name in st.secrets else {}
-    except (FileNotFoundError, st.errors.StreamlitSecretNotFoundError):
-        return {}
-
-
-@st.cache_resource(show_spinner=False)
-def get_firestore_repository():
-    return make_firestore_repository(read_secret_section("firebase"))
-
-
-@st.cache_resource(show_spinner=False)
-def get_file_storage(root):
-    return LocalFileStorage(root)
-
-
-# CT 원본은 JCloud 영구 디스크, 케이스 메타데이터는 Firestore에 저장합니다.
-# secrets에 Firebase 설정이 없으면 메타데이터만 세션 메모리에 두는 미연결 모드로 동작합니다.
-storage_error = None
-if read_secret_section("firebase"):
-    try:
-        case_repository = get_firestore_repository()
-    except Exception as error:  # 잘못된 키·네트워크 오류를 화면에 알립니다.
-        case_repository = None
-        storage_error = f"Firestore에 연결하지 못했어요: {error}"
-else:
-    case_repository = st.session_state.setdefault("case_repository", InMemoryCaseRepository())
-
-storage_root = (
-    read_secret_section("storage").get("root")
-    or os.environ.get("CASE_STORAGE_ROOT")
-    or DEFAULT_STORAGE_ROOT
-)
-file_storage = get_file_storage(str(storage_root))
-
-stored_cases = {}
-if case_repository is not None:
-    try:
-        stored_cases = case_repository.list_cases()
-    except Exception as error:
-        storage_error = f"저장된 케이스 목록을 불러오지 못했어요: {error}"
-
-cases = dict(st.session_state.setdefault("cases", initial_cases))
-for stored_id, doc in stored_cases.items():
-    cases.setdefault(stored_id, {
-        "exam": doc.get("exam_type", "—"),
-        "slice_count": doc.get("slice_count") or 1,
-        "image_ref": doc.get("image_ref"),
-        "file_count": doc.get("file_count"),
-    })
+cases = st.session_state.setdefault("cases", initial_cases)
 
 mock_ct_images = {
     "HCC_004": {
@@ -252,14 +190,6 @@ def status_badge(status):
     return f'<span class="badge badge-{STATUS_STYLES[status][0]}">{status}</span>'
 
 
-def storage_badge_text():
-    if case_repository is None:
-        return "저장소 연결 오류"
-    if case_repository.is_persistent:
-        return "교육용 모의 케이스 · Firestore 연결됨"
-    return "교육용 모의 케이스 · Firestore 미연결 · 세션 동안만 유지"
-
-
 def render_app_bar(case_id=None):
     if case_id is None:
         crumbs = '<span class="is-current">케이스 목록</span>'
@@ -274,7 +204,7 @@ def render_app_bar(case_id=None):
         '<span class="appbar-name">간 CT 검토실</span>'
         '<span class="appbar-divider"></span>'
         f'<nav class="appbar-crumbs" aria-label="현재 위치">{crumbs}</nav>'
-        f'<span class="appbar-badge">{storage_badge_text()}</span>'
+        '<span class="appbar-badge">모의 데이터 · 세션 동안만 유지</span>'
         "</div></header>"
     )
 
@@ -327,8 +257,6 @@ def chart_axis_style(chart):
 
 def render_case_list():
     render_app_bar()
-    if storage_error:
-        st.error(storage_error)
 
     title_col, action_col = st.columns([3, 1], vertical_alignment="bottom")
     title_col.html(
@@ -340,55 +268,22 @@ def render_case_list():
             with st.form("register_case"):
                 case_id_input = st.text_input("새 케이스 ID", placeholder="예: HCC_025")
                 exam_type = st.selectbox("검사 종류", ["치료 전 CT", "치료 후 CT"])
-                dicom_files = st.file_uploader(
-                    "CT DICOM 파일",
-                    type=list(DICOM_EXTENSIONS),
-                    accept_multiple_files=True,
-                    help="한 시리즈의 .dcm 파일을 여러 개 함께 선택할 수 있어요.",
-                )
+                new_slice_count = st.number_input("단면 수", min_value=1, value=1)
                 submitted = st.form_submit_button("등록", type="primary")
 
             if submitted:
-                new_case_id, errors = validate_registration(case_id_input, cases, dicom_files)
+                new_case_id = case_id_input.strip().upper()
 
-                if errors:
-                    for error in errors:
-                        st.warning(error)
-                elif case_repository is None:
-                    st.error("저장소에 연결되지 않아 등록할 수 없어요. 화면 위의 오류를 확인해 주세요.")
+                if not new_case_id:
+                    st.warning("케이스 ID를 입력해 주세요.")
+                elif new_case_id in cases:
+                    st.warning("이미 등록된 케이스 ID예요.")
                 else:
-                    try:
-                        with st.spinner("CT 파일을 저장하고 있어요…"):
-                            saved = register_case(
-                                case_repository,
-                                file_storage,
-                                new_case_id,
-                                exam_type,
-                                dicom_files,
-                            )
-                    except CaseAlreadyExistsError as error:
-                        st.warning(str(error))
-                    except CaseStoreError as error:
-                        st.error(str(error))
-                    except Exception as error:
-                        st.error(f"등록 중 예상하지 못한 오류가 났어요. 파일과 기록을 저장하지 않았어요. ({error})")
-                    else:
-                        cases[new_case_id] = {
-                            "exam": exam_type,
-                            "slice_count": saved["slice_count"],
-                            "image_ref": saved["image_ref"],
-                            "file_count": saved["file_count"],
-                        }
-                        total_mb = saved["total_bytes"] / (1024 * 1024)
-                        summary = f"CT 파일 {saved['file_count']}개 · {total_mb:.1f} MB를 서버 디스크에 저장했어요."
-                        if case_repository.is_persistent:
-                            st.success(f"{new_case_id} 케이스를 등록했어요. {summary} 케이스 정보는 Firestore에 기록했어요.")
-                        else:
-                            # Firestore 미연결: 영구 저장 성공으로 표시하지 않습니다.
-                            st.info(
-                                f"{new_case_id} 케이스를 이 세션에 등록했어요. {summary}\n\n"
-                                "Firestore가 연결되지 않아 케이스 정보는 새로고침하면 사라져요."
-                            )
+                    cases[new_case_id] = {
+                        "exam": exam_type,
+                        "slice_count": new_slice_count,
+                    }
+                    st.success(f"{new_case_id} 케이스를 등록했어요.")
 
     list_col, detail_col = st.columns([2.3, 1], gap="large")
     selected_case = None
@@ -509,8 +404,6 @@ def render_case_list():
         image_text = " · ".join(str(number) for number in slices) + "번" if slices else "없음"
         volume_text = f"{measurement['volume_ml']:.1f} mL" if measurement else "—"
         volume_class = ' class="is-measure"' if measurement else ""
-        file_count = cases[selected_id].get("file_count")
-        stored_text = f"{file_count}개 저장됨 · 뷰어 연결 전" if file_count else "없음"
 
         st.html(
             '<div class="detail-head">'
@@ -524,7 +417,6 @@ def render_case_list():
             f"<div><dt>검사 종류</dt><dd>{selected_case['검사 종류']}</dd></div>"
             f"<div><dt>단면 수</dt><dd>{slice_count}장</dd></div>"
             f"<div><dt>모의 영상</dt><dd>{image_text}</dd></div>"
-            f"<div><dt>CT 원본</dt><dd>{stored_text}</dd></div>"
             f"<div><dt>모의 부피</dt><dd{volume_class}>{volume_text}</dd></div>"
             "</dl>"
         )
