@@ -28,20 +28,19 @@ dddd
 
 ### A에서 등록한 CT 열기
 
-케이스 목록에 넘기는 `cases`의 각 케이스 ID에 영상 참조를 담으면, 목록과 뷰어는 그 레코드의 CT를 엽니다.
+목록과 뷰어는 `app.py`의 `cases`(`case_ui.load_cases()`가 Firestore 문서와 모의 케이스를 합친 dict)를 읽습니다. 등록된 케이스의 레코드는 아래 형식입니다.
 
 ```python
-st.session_state["cases"][case_id] = {
-    "image_ref": str(ct_directory),
-    "series_uid": str(series_uid),
+cases[case_id] = {
     "exam": "치료 전 CT",
-    "slice_count": len(ct_slices),
+    "slice_count": 79,                        # DICOM에서 읽은 실제 단면 수
+    "image_ref": "/srv/uploads/cases/HCC_025/20261125T0100_ab12cd34",  # 서버 폴더 절대 경로
+    "series_uid": "1.3.6.1.4...",             # DICOM SeriesInstanceUID
+    ...
 }
 ```
 
-`image_ref`는 앱 서버에서 읽을 수 있는 단일 CT 시리즈의 DICOM 폴더입니다. 상대 경로는 `app.py`가 있는 폴더를 기준으로 해석합니다. `series_uid`는 그 시리즈의 DICOM SeriesInstanceUID입니다. 목록의 검사 이름과 단면 수는 각각 `exam`과 `slice_count`로 전달할 수 있습니다. 뷰어는 DICOM에서 읽은 실제 단면 수를 표시합니다. 정합을 확인할 DICOM SEG가 있으면 `seg_ref`에 서버가 읽을 수 있는 SEG 파일 경로를 지정합니다.
-
-JCloud 디스크에 저장하면 그 폴더 경로를 넘깁니다. Firebase Storage를 사용하면 저장된 DICOM 파일을 서버의 읽기 가능한 폴더로 가져온 뒤 그 경로를 넘깁니다.
+뷰어는 `image_ref`·`series_uid` 키가 있으면 등록된 CT로 보고 그 폴더를 엽니다. 모의 케이스에는 두 키가 없습니다. 정합을 확인할 DICOM SEG가 있으면 `seg_ref`에 서버가 읽을 수 있는 SEG 파일 경로를 지정합니다.
 
 ### CT 뷰어에서 분석으로 넘기는 값
 
@@ -58,10 +57,61 @@ JCloud 디스크에 저장하면 그 폴더 경로를 넘깁니다. Firebase Sto
 
 `measure_tumor()`는 마스크의 픽셀 수에 행·열 픽셀 간격을 곱해 단면별 `areas_mm2`를 반환합니다. 전체 CT 단면 간격이 일정하면 면적 합계에 그 간격을 곱해 `volume_ml`을 계산합니다. 뷰어는 면적을 cm²로 표시하며, 단면 간격을 확인할 수 없으면 부피 카드에 이유를 표시합니다.
 
-CT 단면 정렬, 표시 변환, SEG 정합 및 면적·부피 계산은 아래 명령으로 검사할 수 있습니다.
-
-```bash
-uv run --no-project --managed-python --python 3.12 --with-requirements requirements.txt python -B -m unittest discover -s tests -v
-```
 
 데이터는 교육용 공개 비식별 [HCC-TACE-Seg](https://doi.org/10.7937/TCIA.5FNA-0924) 자료를 사용합니다. 배포처는 The Cancer Imaging Archive이며 이용 조건은 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)입니다.
+
+## 케이스 등록·저장·검색 (A)
+
+### 저장 구조
+
+| 무엇을 | 어디에 | 설정 |
+| --- | --- | --- |
+| CT 원본 `.dcm` | 앱 서버 디스크 (JCloud 영구 디스크) | `secrets.toml`의 `[storage] root` 또는 환경 변수 `CASE_STORAGE_ROOT`. 없으면 `data/uploads` |
+| 케이스 정보 | Cloud Firestore `cases/{case_id}` 문서 | `secrets.toml`의 `[firebase]` (서비스 계정 키) |
+
+`.streamlit/secrets.toml.example`을 `.streamlit/secrets.toml`로 복사해 값을 채웁니다. `secrets.toml`과 서비스 계정 JSON은 `.gitignore`에 있어 커밋되지 않습니다. `[firebase]`가 없으면 **Firestore 미연결 모드**로 실행되어, 등록한 케이스 정보는 그 브라우저 세션 동안만 유지됩니다.
+
+원본은 업로드 한 번마다 `{root}/cases/{case_id}/{upload_id}/0001.dcm, 0002.dcm, …`에 저장됩니다. 원본 파일명은 겹칠 수 있어 선택 순서대로 번호를 붙입니다.
+
+### 등록 순서
+
+1. 입력 검사 (`case_validation.py`): 케이스 ID 형식(영문 대문자·숫자·`_`·`-`)·중복, 파일 선택 여부, `.dcm` 확장자, 빈 파일
+2. 원본 저장: 임시 폴더에 모두 쓴 뒤 최종 폴더로 옮깁니다
+3. 시리즈 검사: B의 `dicom_ct.load_ct_series`로 저장 폴더를 읽어 한 CT 시리즈인지 확인합니다. 실패하면 이번 업로드 폴더를 지우고 B의 안내 문구를 보여 줍니다
+4. Firestore 문서 생성: `create()`라서 같은 ID가 이미 있으면 실패하고, 기존 문서는 덮어쓰지 않습니다
+   - 중복·권한 거절처럼 **확정 실패**면 이번 업로드 폴더를 지웁니다
+   - 타임아웃처럼 **결과를 알 수 없으면** 늦게 저장될 수 있어 파일을 보존하고 안내합니다
+
+### Firestore 문서 필드 (`cases/{case_id}`)
+
+| 필드 | 값 |
+| --- | --- |
+| `case_id`, `exam_type` | 케이스 ID, 검사 종류 (`치료 전 CT` / `치료 후 CT`) |
+| `image_ref` | 저장 폴더 기준 상대 경로 (예: `cases/HCC_025/20261125T0100_ab12cd34`). 화면에서 서버 절대 경로로 바꿔 뷰어에 넘깁니다 |
+| `series_uid`, `slice_count` | 시리즈 검사에서 읽은 SeriesInstanceUID와 실제 단면 수 |
+| `file_count`, `total_bytes`, `storage_backend` | 업로드 파일 수·크기, 저장 방식 (`jcloud_disk`) |
+| `review_status`, `assignee_uid` | 검토 상태(처음 `검토 대기`), 담당자 — D 담당이 갱신 |
+| `created_by`, `created_at` | 등록자 UID (D의 로그인 연결 후), 서버 기록 시각 |
+
+### 목록·검색
+
+- 모든 접속자가 Firestore 목록을 30초 동안 함께 캐시해 읽기 횟수를 줄입니다. 다른 사람이 방금 등록한 케이스는 표 오른쪽 위 새로고침 버튼으로 바로 불러옵니다.
+- 케이스 ID 부분 일치(대소문자 무시)와 검토 상태로 거릅니다. 계산은 `case_list.py`에 있어 Streamlit 없이 테스트합니다.
+- 문서 값이 빠지거나 형식이 잘못돼도 목록이 깨지지 않도록 기본값을 채웁니다.
+
+### 파일 구성
+
+| 파일 | 역할 |
+| --- | --- |
+| `case_ui.py` | Streamlit 화면 조각. `app.py`는 `load_cases`, `render_storage_notice`, `render_register_form`, `render_case_table`만 부릅니다 |
+| `case_validation.py` | 등록 입력 검사 |
+| `case_store.py` | 원본 저장(`LocalFileStorage`), Firestore 저장소, 등록 순서(`register_case`) |
+| `case_list.py` | 문서 → 목록 레코드 변환, 검색·필터·상태별 개수 |
+
+## 테스트
+
+A·B 테스트를 함께 실행합니다 (pytest는 B의 unittest 테스트도 실행합니다).
+
+```bash
+uv run --no-project --managed-python --python 3.12 --with-requirements requirements.txt --with pytest python -B -m pytest -q
+```
