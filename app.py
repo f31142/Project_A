@@ -340,7 +340,6 @@ def render_case_list():
             with st.form("register_case"):
                 case_id_input = st.text_input("새 케이스 ID", placeholder="예: HCC_025")
                 exam_type = st.selectbox("검사 종류", ["치료 전 CT", "치료 후 CT"])
-                new_slice_count = st.number_input("단면 수", min_value=1, value=1)
                 dicom_files = st.file_uploader(
                     "CT DICOM 파일",
                     type=list(DICOM_EXTENSIONS),
@@ -365,7 +364,6 @@ def render_case_list():
                                 file_storage,
                                 new_case_id,
                                 exam_type,
-                                new_slice_count,
                                 dicom_files,
                             )
                     except CaseAlreadyExistsError as error:
@@ -377,7 +375,7 @@ def render_case_list():
                     else:
                         cases[new_case_id] = {
                             "exam": exam_type,
-                            "slice_count": new_slice_count,
+                            "slice_count": saved["slice_count"],
                             "image_ref": saved["image_ref"],
                             "file_count": saved["file_count"],
                         }

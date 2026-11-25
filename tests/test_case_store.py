@@ -98,13 +98,13 @@ def test_delete_upload_refuses_paths_outside_root(tmp_path):
 
 def test_register_case_saves_files_then_document(tmp_path):
     repo, storage = InMemoryCaseRepository(), LocalFileStorage(tmp_path)
-    saved = register_case(repo, storage, "HCC_025", "치료 전 CT", 79, uploads(3))
+    saved = register_case(repo, storage, "HCC_025", "치료 전 CT", uploads(3))
 
     doc = repo.list_cases()["HCC_025"]
     assert doc["image_ref"] == saved["image_ref"]
     assert storage.exists(doc["image_ref"])
     assert doc["exam_type"] == "치료 전 CT"
-    assert doc["slice_count"] == 79
+    assert doc["slice_count"] == 3  # 단면 수 = 업로드한 파일 수
     assert doc["file_count"] == 3
     assert doc["total_bytes"] == sum(len(f"dicom-{i}") for i in (1, 2, 3))
     assert doc["review_status"] == INITIAL_REVIEW_STATUS
@@ -114,10 +114,10 @@ def test_register_case_saves_files_then_document(tmp_path):
 
 def test_duplicate_registration_keeps_existing_and_removes_new_files(tmp_path):
     repo, storage = InMemoryCaseRepository(), LocalFileStorage(tmp_path)
-    first = register_case(repo, storage, "HCC_025", "치료 전 CT", 1, uploads(2))
+    first = register_case(repo, storage, "HCC_025", "치료 전 CT", uploads(2))
 
     with pytest.raises(CaseAlreadyExistsError, match="이미 등록된"):
-        register_case(repo, storage, "HCC_025", "치료 후 CT", 1, uploads(5))
+        register_case(repo, storage, "HCC_025", "치료 후 CT", uploads(5))
 
     doc = repo.list_cases()["HCC_025"]
     assert doc["exam_type"] == "치료 전 CT"  # 기존 문서는 그대로
@@ -134,11 +134,11 @@ def test_rejected_write_rolls_back_only_this_upload(tmp_path):
             super().create(case_id, data)
 
     repo, storage = FailingRepo(), LocalFileStorage(tmp_path)
-    kept = register_case(repo, storage, "HCC_001", "치료 전 CT", 1, uploads(1))
+    kept = register_case(repo, storage, "HCC_001", "치료 전 CT", uploads(1))
 
     repo.fail = True
     with pytest.raises(CaseStoreError, match="업로드를 취소"):
-        register_case(repo, storage, "HCC_002", "치료 전 CT", 1, uploads(2))
+        register_case(repo, storage, "HCC_002", "치료 전 CT", uploads(2))
 
     assert case_dirs(tmp_path, "HCC_002") == []
     assert storage.exists(kept["image_ref"])
@@ -155,7 +155,7 @@ def test_ambiguous_error_keeps_files_even_if_document_not_yet_visible(tmp_path):
 
     repo, storage = LateWriteRepo(), LocalFileStorage(tmp_path)
     with pytest.raises(CaseStoreError, match="보존"):
-        register_case(repo, storage, "HCC_025", "치료 전 CT", 1, uploads(2))
+        register_case(repo, storage, "HCC_025", "치료 전 CT", uploads(2))
 
     # 늦게 반영된 문서가 가리키는 파일이 그대로 있어야 합니다.
     InMemoryCaseRepository.create(repo, *repo.pending)
@@ -174,7 +174,7 @@ def test_rollback_failure_is_reported(tmp_path, monkeypatch):
 
     monkeypatch.setattr(storage, "delete_upload", broken_delete)
     with pytest.raises(CaseStoreError, match="정리도 실패"):
-        register_case(FailingRepo(), storage, "HCC_003", "치료 전 CT", 1, uploads(1))
+        register_case(FailingRepo(), storage, "HCC_003", "치료 전 CT", uploads(1))
 
 
 class LostResponseRepo(InMemoryCaseRepository):
@@ -197,7 +197,7 @@ class LostResponseRepo(InMemoryCaseRepository):
 
 def test_lost_response_after_successful_write_keeps_files(tmp_path):
     repo, storage = LostResponseRepo(), LocalFileStorage(tmp_path)
-    saved = register_case(repo, storage, "HCC_025", "치료 전 CT", 1, uploads(2))
+    saved = register_case(repo, storage, "HCC_025", "치료 전 CT", uploads(2))
 
     assert storage.exists(saved["image_ref"])
     assert repo.get("HCC_025")["image_ref"] == saved["image_ref"]
@@ -206,7 +206,7 @@ def test_lost_response_after_successful_write_keeps_files(tmp_path):
 def test_retry_reporting_already_exists_for_own_write_keeps_files(tmp_path):
     repo = LostResponseRepo(error=CaseAlreadyExistsError("HCC_025"))
     storage = LocalFileStorage(tmp_path)
-    saved = register_case(repo, storage, "HCC_025", "치료 전 CT", 1, uploads(2))
+    saved = register_case(repo, storage, "HCC_025", "치료 전 CT", uploads(2))
 
     assert storage.exists(saved["image_ref"])
 
@@ -216,7 +216,7 @@ def test_unverifiable_write_keeps_files_and_reports_location(tmp_path):
     storage = LocalFileStorage(tmp_path)
 
     with pytest.raises(CaseStoreError, match="보존") as excinfo:
-        register_case(repo, storage, "HCC_025", "치료 전 CT", 1, uploads(2))
+        register_case(repo, storage, "HCC_025", "치료 전 CT", uploads(2))
 
     kept = case_dirs(tmp_path, "HCC_025")
     assert len(kept) == 1
@@ -226,7 +226,7 @@ def test_unverifiable_write_keeps_files_and_reports_location(tmp_path):
 def test_registered_case_is_found_again_with_new_storage_instance(tmp_path):
     """앱 재시작을 흉내 냅니다: 같은 저장소(문서)와 새 파일 저장소 객체로 다시 조회합니다."""
     repo = InMemoryCaseRepository()
-    saved = register_case(repo, LocalFileStorage(tmp_path), "HCC_025", "치료 전 CT", 1, uploads(2))
+    saved = register_case(repo, LocalFileStorage(tmp_path), "HCC_025", "치료 전 CT", uploads(2))
 
     reopened = LocalFileStorage(tmp_path)
     doc = repo.list_cases()["HCC_025"]

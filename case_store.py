@@ -193,10 +193,11 @@ def make_firestore_repository(service_account_info):
 # ---------------------------------------------------------------------------
 
 
-def register_case(repository, storage, case_id, exam_type, slice_count, files, created_by=None):
+def register_case(repository, storage, case_id, exam_type, files, created_by=None):
     """파일 저장 → 문서 생성 순서로 케이스를 등록합니다.
 
     입력 검사(case_validation)는 호출 전에 끝났다고 가정합니다.
+    단면 수는 사람이 입력하지 않고 업로드한 DICOM 파일 수로 정합니다(파일 1개 = 단면 1장).
     문서 쓰기가 확정 실패(중복·거절)일 때만 이번 업로드 폴더를 지우고, 결과 불명이면 파일을 보존합니다.
     """
     files = list(files)
@@ -204,7 +205,7 @@ def register_case(repository, storage, case_id, exam_type, slice_count, files, c
     data = {
         "case_id": case_id,
         "exam_type": exam_type,
-        "slice_count": int(slice_count),
+        "slice_count": len(files),
         "storage_backend": STORAGE_BACKEND,
         "file_count": len(files),
         "total_bytes": sum(len(file.getvalue()) for file in files),
