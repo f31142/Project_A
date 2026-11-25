@@ -10,8 +10,19 @@ import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw
 
-APP_DIR = Path(__file__).parent
+from ct_analysis import TumorMeasurement, build_analysis_slices, measure_tumor
+from ct_case import has_case_ct_reference, load_case_ct, load_case_seg
+from dicom_ct import (
+    CT_PREVIEW_COLUMNS,
+    DicomReadError,
+    render_ct_contour_png,
+    render_ct_png,
+    render_ct_preview_sheet,
+)
+
+APP_DIR = Path(__file__).resolve().parent
 MOCK_CT_DIR = APP_DIR / "assets" / "mock_ct"
+CT_PREVIEW_TILE_SIZE = 256
 
 INK = "#121917"
 INK_3 = "#636D69"
@@ -60,6 +71,24 @@ PERSISTENT_KEY_PREFIXES = (
 
 st.set_page_config(page_title="간 CT 검토실", layout="wide")
 st.html("<style>" + (APP_DIR / "assets" / "app.css").read_text(encoding="utf-8") + "</style>")
+ct_viewport_component = st.components.v2.component(
+    "ct_viewport",
+    html=(
+        '<div class="ct-view-controls" role="group" aria-label="CT 보기 조작">'
+        '<button type="button" data-view-action="zoom-out" aria-label="축소">− 축소</button>'
+        '<output aria-label="현재 배율">100%</output>'
+        '<button type="button" data-view-action="zoom-in" aria-label="확대">+ 확대</button>'
+        '<button type="button" data-view-action="reset">초기화</button>'
+        '</div>'
+        '<div class="ct-slice-preview" role="region" aria-label="CT 영상" tabindex="0">'
+        '<div class="ct-view-content">'
+        '<img alt="CT 단면" draggable="false"><canvas hidden aria-hidden="true"></canvas>'
+        '</div>'
+        "</div>"
+    ),
+    js=(APP_DIR / "assets" / "ct_slice_preview.js").read_text(encoding="utf-8"),
+    isolate_styles=False,
+)
 
 for state_key in list(st.session_state.keys()):
     if str(state_key).startswith(PERSISTENT_KEY_PREFIXES):
@@ -144,10 +173,7 @@ mock_ct_images = {
 }
 
 mock_measurements = {
-    "HCC_004": {
-        "areas_cm2": {34: 29.6, 41: 31.9, 50: 15.7},
-        "volume_ml": 154.8,
-    },
+    "HCC_004": TumorMeasurement(areas_mm2={34: 2960, 41: 3190, 50: 1570}, volume_ml=154.8),
 }
 
 review_statuses = st.session_state.setdefault("review_statuses", {})
@@ -207,7 +233,7 @@ def render_app_bar(case_id=None):
         '<span class="appbar-name">간 CT 검토실</span>'
         '<span class="appbar-divider"></span>'
         f'<nav class="appbar-crumbs" aria-label="현재 위치">{crumbs}</nav>'
-        '<span class="appbar-badge">모의 데이터 · 세션 동안만 유지</span>'
+        '<span class="appbar-badge">교육용 · 검토 기록은 세션 동안 유지</span>'
         "</div></header>"
     )
 
@@ -236,6 +262,39 @@ def load_slice_bytes(case_id, number):
     if file_name and (MOCK_CT_DIR / file_name).is_file():
         return (MOCK_CT_DIR / file_name).read_bytes()
     return None
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def ct_preview_sheet(files: tuple[tuple[Path, int], ...], seg_source=None, _masks=None) -> bytes:
+    # seg_source keeps the normal and annotated preview sheets in separate cache entries.
+    paths = tuple(path for path, _ in files)
+    return render_ct_preview_sheet(paths, CT_PREVIEW_TILE_SIZE, masks=_masks)
+
+
+def render_ct_viewport(
+    image_source, viewer_id, slice_number, slice_count, dicom_slices, *, seg_source=None, masks=None
+):
+    # Streamlit serves these images at stable media URLs across reruns.
+    with st.container(key=f"ct_full_slice_{slice_number}"):
+        st.image(image_source, width="stretch", output_format="PNG")
+    if len(dicom_slices) > 1:
+        try:
+            files = tuple((item.path, item.path.stat().st_mtime_ns) for item in dicom_slices)
+            sheet = ct_preview_sheet(files, seg_source, _masks=masks)
+        except (DicomReadError, OSError):
+            sheet = None
+        if sheet is not None:
+            with st.container(key="ct_preview_sheet"):
+                st.image(sheet, width=CT_PREVIEW_TILE_SIZE * CT_PREVIEW_COLUMNS, output_format="JPEG")
+
+    ct_viewport_component(
+        key=f"ct_viewport_{viewer_id}",
+        data={
+            "caseId": viewer_id,
+            "tileSize": CT_PREVIEW_TILE_SIZE,
+            "sliceCount": slice_count,
+        },
+    )
 
 
 def chart_axis_style(chart):
@@ -291,10 +350,32 @@ def render_case_list():
             return
 
         selected_id = selected_case["케이스 ID"]
-        slice_count = selected_case["단면 수"]
-        slices = case_slice_numbers(selected_id)
-        preview_number = 41 if 41 in slices else (slices[0] if slices else None)
-        preview_bytes = load_slice_bytes(selected_id, preview_number) if preview_number else None
+        case = cases[selected_id]
+        ct_slices, ct_error = load_case_ct(selected_id, case)
+        registered_ct = has_case_ct_reference(case)
+        slice_count = len(ct_slices) if ct_slices else selected_case["단면 수"]
+        if ct_slices or registered_ct:
+            image_label = "DICOM 영상"
+            image_text = f"{len(ct_slices)}장" if ct_slices else "열 수 없음"
+            volume_label = "종양 부피"
+            preview_bytes = None
+            measurement = None
+            if ct_slices:
+                preview_number = (len(ct_slices) + 1) // 2
+                try:
+                    preview_bytes = render_ct_png(ct_slices[preview_number - 1].path)
+                except DicomReadError as exc:
+                    ct_error = str(exc)
+                _, tumor_masks, _ = load_case_seg(selected_id, case, ct_slices)
+                measurement = measure_tumor(build_analysis_slices(ct_slices, tumor_masks))
+        else:
+            slices = case_slice_numbers(selected_id)
+            preview_number = 41 if 41 in slices else (slices[0] if slices else None)
+            preview_bytes = load_slice_bytes(selected_id, preview_number) if preview_number else None
+            image_label = "모의 영상"
+            image_text = " · ".join(map(str, slices)) + "번" if slices else "없음"
+            volume_label = "모의 부피"
+            measurement = mock_measurements.get(selected_id)
 
         if preview_bytes is not None:
             thumbnail = (
@@ -305,12 +386,13 @@ def render_case_list():
                 "</div>"
             )
         else:
-            thumbnail = '<div class="thumb-empty">첨부된 영상 없음</div>'
+            missing = "DICOM 미리보기 없음" if registered_ct else "첨부된 영상 없음"
+            thumbnail = f'<div class="thumb-empty">{missing}</div>'
 
-        measurement = mock_measurements.get(selected_id)
-        image_text = " · ".join(str(number) for number in slices) + "번" if slices else "없음"
-        volume_text = f"{measurement['volume_ml']:.1f} mL" if measurement else "—"
-        volume_class = ' class="is-measure"' if measurement else ""
+        count_text = f"{slice_count}장" if slice_count is not None else "—"
+        volume_ml = measurement.volume_ml if measurement is not None else None
+        volume_text = f"{volume_ml:.1f} mL" if volume_ml is not None else "—"
+        volume_class = ' class="is-measure"' if volume_ml is not None else ""
 
         st.html(
             '<div class="detail-head">'
@@ -321,12 +403,14 @@ def render_case_list():
             "</div></div>"
             f"{thumbnail}"
             '<dl class="facts">'
-            f"<div><dt>검사 종류</dt><dd>{selected_case['검사 종류']}</dd></div>"
-            f"<div><dt>단면 수</dt><dd>{slice_count}장</dd></div>"
-            f"<div><dt>모의 영상</dt><dd>{image_text}</dd></div>"
-            f"<div><dt>모의 부피</dt><dd{volume_class}>{volume_text}</dd></div>"
+            f"<div><dt>검사 종류</dt><dd>{escape(str(selected_case['검사 종류']))}</dd></div>"
+            f"<div><dt>단면 수</dt><dd>{count_text}</dd></div>"
+            f"<div><dt>{image_label}</dt><dd>{image_text}</dd></div>"
+            f"<div><dt>{volume_label}</dt><dd{volume_class}>{volume_text}</dd></div>"
             "</dl>"
         )
+        if ct_error and registered_ct:
+            st.warning(ct_error)
         st.button(
             "뷰어 열기",
             type="primary",
@@ -339,19 +423,33 @@ def render_case_list():
 
 
 def render_viewer(viewer_id):
-    total_slices = cases[viewer_id]["slice_count"]
+    case = cases[viewer_id]
+    registered_ct = has_case_ct_reference(case)
+    dicom_slices, dicom_error = load_case_ct(viewer_id, case)
+    is_dicom = bool(dicom_slices)
+    use_mock = not (registered_ct or is_dicom)
+    seg_source, tumor_masks, seg_error = (
+        load_case_seg(viewer_id, case, dicom_slices) if is_dicom else (None, {}, None)
+    )
+    total_slices = len(dicom_slices) if is_dicom else (case.get("slice_count") or 1)
     slice_key = f"slice_{viewer_id}"
     contour_key = f"contour_{viewer_id}"
-    case_images = mock_ct_images.get(viewer_id, {})
-    measurement = mock_measurements.get(viewer_id)
-    uploaded_slices = uploads_by_case.setdefault(viewer_id, {})
+    case_images = mock_ct_images.get(viewer_id, {}) if use_mock else {}
+    analysis_slices = build_analysis_slices(dicom_slices, tumor_masks)
+    measurement = mock_measurements.get(viewer_id) if use_mock else measure_tumor(analysis_slices)
+    areas_cm2 = (
+        {number: area / 100 for number, area in measurement.areas_mm2.items()}
+        if measurement is not None else {}
+    )
+    area_title = "종양 면적" if is_dicom else "모의 종양 면적"
+    uploaded_slices = uploads_by_case.setdefault(viewer_id, {}) if use_mock else {}
     case_notes = notes_by_case.setdefault(viewer_id, [])
     viewer_status = review_statuses.get(viewer_id, "검토 대기")
 
     if total_slices == 1:
         slice_number = 1
     else:
-        st.session_state.setdefault(slice_key, 1)
+        move_to_slice(slice_key, st.session_state.get(slice_key, 1), total_slices)
         slice_number = st.session_state[slice_key]
 
     render_app_bar(viewer_id)
@@ -365,37 +463,40 @@ def render_viewer(viewer_id):
             on_click=close_viewer,
             args=(viewer_id,),
         )
-        meta = f"{cases[viewer_id]['exam']} · {total_slices} 단면"
-        if measurement is not None:
+        meta = str(case.get("exam") or "CT 검사")
+        if not (registered_ct and dicom_error):
+            meta += f" · {total_slices} 단면"
+        if measurement is not None and use_mock:
             meta += " · 모의 측정값 있음"
         st.html(
             '<div class="viewer-title">'
             '<div class="viewer-title-row">'
             f'<h1 class="viewer-id">{escape(viewer_id)}</h1>{status_badge(viewer_status)}'
             "</div>"
-            f'<span class="caption">{meta}</span>'
+            f'<span class="caption">{escape(meta)}</span>'
             "</div>",
             width="stretch",
         )
 
-        with st.popover("현재 단면에 PNG 첨부", icon=":material/attach_file:"):
-            with st.form(f"attach_ct_{viewer_id}_{slice_number}", clear_on_submit=True):
-                png_file = st.file_uploader("모의 CT PNG", type=["png"])
-                attach_clicked = st.form_submit_button("첨부", type="primary")
+        if use_mock:
+            with st.popover("현재 단면에 PNG 첨부", icon=":material/attach_file:"):
+                with st.form(f"attach_ct_{viewer_id}_{slice_number}", clear_on_submit=True):
+                    png_file = st.file_uploader("모의 CT PNG", type=["png"])
+                    attach_clicked = st.form_submit_button("첨부", type="primary")
 
-            if attach_clicked:
-                if png_file is None:
-                    st.warning("첨부할 PNG를 선택해 주세요.")
-                else:
-                    image_bytes = png_file.getvalue()
-                    try:
-                        with Image.open(BytesIO(image_bytes), formats=("PNG",)) as image:
-                            image.load()
-                    except (OSError, SyntaxError, Image.DecompressionBombError):
-                        st.error("이미지를 읽을 수 없어요. 정상적인 PNG 파일을 선택해 주세요.")
+                if attach_clicked:
+                    if png_file is None:
+                        st.warning("첨부할 PNG를 선택해 주세요.")
                     else:
-                        uploaded_slices[slice_number] = image_bytes
-                        st.success(f"{viewer_id}의 {slice_number}번 단면에 PNG를 첨부했어요.")
+                        image_bytes = png_file.getvalue()
+                        try:
+                            with Image.open(BytesIO(image_bytes), formats=("PNG",)) as image:
+                                image.load()
+                        except (OSError, SyntaxError, Image.DecompressionBombError):
+                            st.error("이미지를 읽을 수 없어요. 정상적인 PNG 파일을 선택해 주세요.")
+                        else:
+                            uploaded_slices[slice_number] = image_bytes
+                            st.success(f"{viewer_id}의 {slice_number}번 단면에 PNG를 첨부했어요.")
 
         if viewer_status == "검토 대기":
             st.button(
@@ -416,36 +517,64 @@ def render_viewer(viewer_id):
                 args=(viewer_id, "검토 완료"),
             )
 
+    if dicom_error:
+        if registered_ct:
+            st.error(f"등록된 DICOM CT를 열 수 없어요. {dicom_error}")
+            return
+        st.warning(f"원본 DICOM을 열 수 없어 모의 영상을 표시해요. {dicom_error}")
+
     uploaded_image = uploaded_slices.get(slice_number)
     original_bytes = uploaded_image
     file_name = case_images.get(slice_number)
-    image_path = None
     overlay_path = None
-    missing_file = None
+    image_error = None
+    tumor_mask = None
 
-    if uploaded_image is None and file_name:
+    if is_dicom:
+        analysis_slice = analysis_slices[slice_number - 1]
+        tumor_mask = analysis_slice.tumor_mask
+        try:
+            original_bytes = analysis_slice.display_png()
+        except DicomReadError as exc:
+            image_error = str(exc)
+    elif uploaded_image is None and file_name:
         candidate = MOCK_CT_DIR / file_name
         if candidate.is_file():
-            image_path = candidate
             original_bytes = candidate.read_bytes()
             overlay_candidate = candidate.with_name(f"{candidate.stem}_overlay.png")
             if overlay_candidate.is_file():
                 overlay_path = overlay_candidate
         else:
-            missing_file = file_name
+            image_error = f"표시할 이미지 파일: {file_name}"
 
     overlay_slices = [
         number
         for number, name in sorted(case_images.items())
         if (MOCK_CT_DIR / f"{Path(name).stem}_overlay.png").is_file()
     ]
-    show_overlay = overlay_path is not None and st.session_state.get(contour_key, False)
+    contour_requested = st.session_state.get(contour_key, False)
+    show_mock_contour = overlay_path is not None and contour_requested
+    show_dicom_contour = bool(tumor_masks) and contour_requested
+    image_source = str(overlay_path) if show_mock_contour else original_bytes
+    if show_dicom_contour and tumor_mask is not None and original_bytes is not None:
+        try:
+            image_source = render_ct_contour_png(original_bytes, tumor_mask)
+        except DicomReadError as exc:
+            seg_error = str(exc)
+            show_dicom_contour = False
 
     stage_col, side_col = st.columns([2.75, 1], gap="medium")
 
     with stage_col.container(key="stage"):
-        source_label = "첨부한 PNG" if uploaded_image is not None else "모의 CT"
-        contour_chip = '<span class="chip is-contour">종양 윤곽 표시 중</span>' if show_overlay else ""
+        if is_dicom:
+            source_label = "DICOM CT"
+        else:
+            source_label = "첨부한 PNG" if uploaded_image is not None else "모의 CT"
+        contour_chip = ""
+        if show_dicom_contour:
+            contour_chip = '<span class="chip is-contour">종양 윤곽 켜짐</span>'
+        elif show_mock_contour:
+            contour_chip = '<span class="chip is-contour">종양 윤곽 표시 중</span>'
         st.html(
             '<div class="stage-bar"><div class="stage-chips">'
             f'<span class="chip is-strong">단면 {slice_number} / {total_slices}</span>'
@@ -454,13 +583,15 @@ def render_viewer(viewer_id):
         )
 
         with st.container(key="stage_image"):
-            if uploaded_image is not None:
-                st.image(uploaded_image, width="stretch")
-            elif image_path is not None:
-                st.image(str(overlay_path if show_overlay else image_path), width="stretch")
+            if image_source is not None:
+                render_ct_viewport(
+                    image_source, viewer_id, slice_number, total_slices, dicom_slices,
+                    seg_source=seg_source if show_dicom_contour else None,
+                    masks=tumor_masks if show_dicom_contour else None,
+                )
             else:
-                if missing_file:
-                    hint = f"표시할 이미지 파일: {escape(missing_file)}"
+                if image_error:
+                    hint = escape(image_error)
                 elif case_images:
                     available = " · ".join(str(number) for number in sorted(case_images))
                     hint = f"{available}번 단면에서 모의 CT를 볼 수 있어요. 이 단면에 PNG를 첨부할 수도 있어요."
@@ -502,9 +633,9 @@ def render_viewer(viewer_id):
                     disabled=slice_number >= total_slices,
                 )
 
-        if measurement is not None:
+        if areas_cm2:
             measurements = []
-            for number, area in measurement["areas_cm2"].items():
+            for number, area in areas_cm2.items():
                 measurements.append({
                     "slice_number": number,
                     "area_cm2": area,
@@ -517,7 +648,7 @@ def render_viewer(viewer_id):
                 chart_selection = st.session_state[chart_key]["selection"]
                 points = chart_selection.get("area_point", [])
                 if points:
-                    st.session_state[slice_key] = int(points[0]["slice_number"])
+                    move_to_slice(slice_key, int(points[0]["slice_number"]), total_slices)
 
             point_selection = alt.selection_point(
                 name="area_point",
@@ -542,16 +673,17 @@ def render_viewer(viewer_id):
                     labelPadding=8,
                 ),
             )
-            max_area = max(measurement["areas_cm2"].values())
+            max_area = max(areas_cm2.values())
             y = alt.Y(
                 "area_cm2:Q",
                 axis=None,
                 scale=alt.Scale(domain=[0, max_area * 1.4]),
             )
+            slice_intervals = max(1, total_slices - 1)
             chart = (
                 alt.Chart(alt.Data(values=measurements))
                 .mark_bar(
-                    width=12,
+                    width=alt.ExprRef(expr=f"min(12, width / {slice_intervals} * 0.8)"),
                     cornerRadiusTopLeft=6,
                     cornerRadiusTopRight=6,
                     cursor="pointer",
@@ -562,7 +694,7 @@ def render_viewer(viewer_id):
                     color=alt.condition("datum.is_current", alt.value(MINT), alt.value(TEAL_DIM)),
                     tooltip=[
                         alt.Tooltip("slice_number:Q", title="단면"),
-                        alt.Tooltip("area_cm2:Q", title="모의 면적 (cm²)", format=".1f"),
+                        alt.Tooltip("area_cm2:Q", title=f"{area_title} (cm²)", format=".1f"),
                     ],
                 )
                 .add_params(point_selection)
@@ -573,7 +705,7 @@ def render_viewer(viewer_id):
 
             st.html(
                 '<div class="stage-label">'
-                "<strong>단면별 모의 종양 면적</strong>"
+                f"<strong>단면별 {area_title}</strong>"
                 "<span>슬라이더와 같은 가로축 · 막대를 누르면 그 단면으로 이동</span>"
                 "</div>"
             )
@@ -582,31 +714,40 @@ def render_viewer(viewer_id):
                 key=chart_key,
                 on_select=move_to_selected_slice,
                 theme=None,
-                use_container_width=True,
+                width="stretch",
             )
 
     with side_col:
-        if measurement is None:
-            slice_value = '<span class="metric-value is-empty">측정값 없음</span>'
-            slice_caption = "이 케이스에는 모의 측정값이 없어요"
-            case_value = '<span class="metric-value is-small is-empty">—</span>'
+        current_area = areas_cm2.get(slice_number)
+        if current_area is not None:
+            slice_value = (
+                f'<span class="metric-value">{current_area:.1f}'
+                '<span class="metric-unit">cm²</span></span>'
+            )
+            slice_caption = area_title
         else:
-            current_area = measurement["areas_cm2"].get(slice_number)
-            if current_area is None:
-                measured = " · ".join(str(number) for number in sorted(measurement["areas_cm2"]))
-                slice_value = '<span class="metric-value is-empty">측정값 없음</span>'
+            slice_value = '<span class="metric-value is-empty">측정값 없음</span>'
+            if is_dicom:
+                slice_caption = "이 단면의 측정값이 없어요"
+            elif areas_cm2:
+                measured = " · ".join(str(number) for number in sorted(areas_cm2))
                 slice_caption = f"{measured}번 단면에 측정값이 있어요"
             else:
-                slice_value = (
-                    f'<span class="metric-value">{current_area:.1f}'
-                    '<span class="metric-unit">cm²</span></span>'
-                )
-                slice_caption = "모의 종양 면적"
+                slice_caption = "이 케이스에는 모의 측정값이 없어요"
+
+        volume_ml = measurement.volume_ml if measurement is not None else None
+        if volume_ml is None:
+            case_value = '<span class="metric-value is-small is-empty">—</span>'
+        else:
             case_value = (
-                f'<span class="metric-value is-small">{measurement["volume_ml"]:.1f}'
+                f'<span class="metric-value is-small">{volume_ml:.1f}'
                 '<span class="metric-unit">mL</span></span>'
             )
-
+        volume_caption = "전체 종양 부피" if is_dicom else "모의 전체 종양 부피 · 단면을 바꿔도 그대로"
+        volume_error = (
+            f'<span class="metric-caption">{escape(measurement.volume_error)}</span>'
+            if measurement is not None and measurement.volume_error else ""
+        )
         st.html(
             '<div class="metric is-slice">'
             f'<span class="overline"><span class="dot"></span>이 단면 · {slice_number} / {total_slices}</span>'
@@ -614,30 +755,32 @@ def render_viewer(viewer_id):
             "</div>"
             '<div class="metric" style="margin-top: 12px">'
             '<span class="overline">케이스 전체</span>'
-            f'{case_value}<span class="metric-caption">모의 전체 종양 부피 · 단면을 바꿔도 그대로</span>'
+            f'{case_value}<span class="metric-caption">{volume_caption}</span>{volume_error}'
             "</div>"
         )
 
         with st.container(border=True, key="card_display", gap="small"):
+            contour_available = bool(tumor_masks) and not seg_error if is_dicom else overlay_path is not None
             with st.container(key="contour_row"):
-                st.toggle("종양 윤곽", key=contour_key, disabled=overlay_path is None)
-            if overlay_path is not None:
+                st.toggle("종양 윤곽", key=contour_key, disabled=not contour_available)
+            if seg_error:
+                contour_caption = seg_error
+            elif is_dicom and tumor_mask is not None:
+                contour_caption = "이 단면의 SEG 종양 윤곽을 겹쳐 봅니다"
+            elif is_dicom and tumor_masks:
+                contour_caption = "이 단면에는 종양 윤곽이 없어요"
+            elif is_dicom and seg_source is None:
+                contour_caption = "이 케이스에 연결된 DICOM SEG가 없어요"
+            elif is_dicom:
+                contour_caption = "이 SEG의 종양 마스크가 비어 있어요"
+            elif overlay_path is not None:
                 contour_caption = "이 단면의 모의 윤곽을 겹쳐 봅니다"
             elif overlay_slices:
                 listed = " · ".join(str(number) for number in overlay_slices)
                 contour_caption = f"{listed}번 단면에서 쓸 수 있어요"
             else:
                 contour_caption = "이 케이스에는 윤곽 오버레이가 없어요"
-            st.html(f'<span class="caption">{contour_caption}</span>')
-
-            if 41 in case_images:
-                st.button(
-                    "예시 단면 41번으로 이동",
-                    key=f"jump_41_{viewer_id}",
-                    width="stretch",
-                    on_click=move_to_slice,
-                    args=(slice_key, 41, total_slices),
-                )
+            st.html(f'<span class="caption">{escape(contour_caption)}</span>')
 
         st.html(
             '<nav class="jump" aria-label="아래로 이어지는 도구">'
@@ -714,19 +857,17 @@ def render_viewer(viewer_id):
                 with original_column.container(key="tile_original"):
                     st.image(original, width="stretch")
                     st.html(
-                        '<div class="tile-caption"><span>원본</span>'
+                        f'<div class="tile-caption"><span>원본 · 단면 {slice_number}</span>'
                         '<span class="mono">×1.0</span></div>'
                     )
                 with result_column.container(key="tile_result"):
+                    result_caption = f"<span>{method} 결과 · 단면 {slice_number}</span>"
                     if result is None:
                         st.html('<div class="tile-empty">처리 함수를 연결한 뒤 결과가 표시돼요.</div>')
-                        st.html(f'<div class="tile-caption"><span>{method} 결과</span></div>')
                     else:
                         st.image(result, width="stretch")
-                        st.html(
-                            f'<div class="tile-caption"><span>{method} 결과</span>'
-                            f'<span class="mono is-mint">×{factor:.1f}</span></div>'
-                        )
+                        result_caption += f'<span class="mono is-mint">×{factor:.1f}</span>'
+                    st.html(f'<div class="tile-caption">{result_caption}</div>')
 
     with st.container(border=True, key="card_roi", gap="medium"):
         with st.container(horizontal=True, vertical_alignment="center"):
