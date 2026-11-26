@@ -1,4 +1,5 @@
 from base64 import b64encode
+from copy import deepcopy
 from hashlib import sha256
 from html import escape
 from io import BytesIO
@@ -19,7 +20,7 @@ from dicom_ct import (
     render_ct_png,
     render_ct_preview_sheet,
 )
-from roi_analysis import analyze_roi, normalize_roi_bounds
+from roi_analysis import build_measurement_summary, normalize_roi_bounds, summarize_roi
 
 APP_DIR = Path(__file__).resolve().parent
 MOCK_CT_DIR = APP_DIR / "assets" / "mock_ct"
@@ -50,6 +51,7 @@ PROCESSING_METHODS = [
     "2D 연결 성분 분석",
 ]
 ROI_MODES = ["영상에서 드래그", "좌표 슬라이더"]
+SOURCE_LABELS = {"dicom": "DICOM CT", "mock": "모의 CT", "uploaded_png": "첨부한 PNG"}
 LOGO_SVG = (
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5CE7C4" '
     'stroke-width="2" stroke-linecap="round" aria-hidden="true">'
@@ -241,6 +243,27 @@ def section_heading(number, title, description, anchor):
         f'<span class="section-desc">{description}</span>'
         "</div>"
     )
+
+
+def render_measurement_values(summary):
+    st.caption(f"{summary['case_id']} · {summary['slice_number']}번 단면 · {SOURCE_LABELS[summary['source']]}")
+    area = summary["tumor_area_cm2"]
+    volume = summary["tumor_volume_ml"]
+    area_col, volume_col = st.columns(2)
+    area_col.metric("현재 단면의 종양 면적", f"{area:.1f} cm²" if area is not None else "측정값 없음")
+    volume_col.metric("케이스 전체 종양 부피", f"{volume:.1f} mL" if volume is not None else "측정값 없음")
+    roi = summary["roi"]
+    if roi is None:
+        st.caption("선택한 ROI 없음")
+        return
+    bounds = roi["bounds"]
+    text = (
+        f"사각형 ROI · x {bounds['x0']}–{bounds['x1'] - 1}, y {bounds['y0']}–{bounds['y1'] - 1}"
+        f" · {roi['pixel_count']:,}픽셀 · 평균 밝기 {roi['mean_brightness']:.1f} / 255"
+    )
+    if roi["area_mm2"] is not None:
+        text += f" · ROI 면적 {roi['area_mm2']:,.2f} mm²"
+    st.caption(text)
 
 
 def case_slice_numbers(case_id):
@@ -542,6 +565,23 @@ def render_viewer(viewer_id):
         else:
             image_error = f"표시할 이미지 파일: {file_name}"
 
+    ct_slice = analysis_slice.ct_slice if is_dicom else None
+    source_kind = "dicom" if is_dicom else "mock"
+    image_hash = None
+    roi_key = None
+    if ct_slice is not None:
+        roi_key = f"{viewer_id}_{ct_slice.series_instance_uid}_{ct_slice.sop_instance_uid}"
+    elif original_bytes is not None:
+        if uploaded_image is not None:
+            source_kind = "uploaded_png"
+        image_hash = sha256(original_bytes).hexdigest()
+        roi_key = f"{viewer_id}_mock_{slice_number}_{image_hash}"
+
+    summary = build_measurement_summary(
+        case_id=viewer_id, slice_number=slice_number, source=source_kind,
+        ct_slice=ct_slice, image_sha256=image_hash, measurement=measurement,
+    )
+
     overlay_slices = [
         number
         for number, name in sorted(case_images.items())
@@ -561,10 +601,7 @@ def render_viewer(viewer_id):
     stage_col, side_col = st.columns([2.75, 1], gap="medium")
 
     with stage_col.container(key="stage"):
-        if is_dicom:
-            source_label = "DICOM CT"
-        else:
-            source_label = "첨부한 PNG" if uploaded_image is not None else "모의 CT"
+        source_label = SOURCE_LABELS[source_kind]
         contour_chip = ""
         if show_dicom_contour:
             contour_chip = '<span class="chip is-contour">종양 윤곽 켜짐</span>'
@@ -721,7 +758,7 @@ def render_viewer(viewer_id):
             )
 
     with side_col:
-        current_area = areas_cm2.get(slice_number)
+        current_area = summary["tumor_area_cm2"]
         if current_area is not None:
             slice_value = (
                 f'<span class="metric-value">{current_area:.1f}'
@@ -739,13 +776,15 @@ def render_viewer(viewer_id):
                     slice_caption = "이 케이스에 연결된 DICOM SEG가 없어요."
                 else:
                     slice_caption = "SEG에 측정할 종양 영역이 없어요."
+            elif uploaded_image is not None:
+                slice_caption = "첨부한 PNG에는 연결된 종양 측정값이 없어요."
             elif areas_cm2:
                 measured = " · ".join(str(number) for number in sorted(areas_cm2))
                 slice_caption = f"{measured}번 단면에 측정값이 있어요"
             else:
                 slice_caption = "이 케이스에는 모의 측정값이 없어요"
 
-        volume_ml = measurement.volume_ml if measurement is not None else None
+        volume_ml = summary["tumor_volume_ml"]
         if volume_ml is None:
             case_value = '<span class="metric-value is-small is-empty">—</span>'
         else:
@@ -797,7 +836,8 @@ def render_viewer(viewer_id):
             '<span class="overline">아래로 이어지는 도구</span>'
             '<a href="#section-processing"><span><span class="mono">02</span>원본·처리 비교</span><span>↓</span></a>'
             '<a href="#section-roi"><span><span class="mono">03</span>관심 영역(ROI) 분석</span><span>↓</span></a>'
-            '<a href="#section-memo"><span><span class="mono">04</span>검토 메모</span><span>↓</span></a>'
+            '<a href="#section-summary"><span><span class="mono">04</span>현재 단면 측정 요약</span><span>↓</span></a>'
+            '<a href="#section-memo"><span><span class="mono">05</span>검토 메모</span><span>↓</span></a>'
             "</nav>"
         )
 
@@ -911,22 +951,17 @@ def render_viewer(viewer_id):
                 disabled=original_bytes is None,
             )
 
+        saved_bounds = roi_by_slice.get(roi_key)
+        bounds = saved_bounds
+        if original_bytes is not None and (roi_enabled or saved_bounds is not None):
+            with Image.open(BytesIO(original_bytes)) as image:
+                source = image.convert("RGB")
+            gray = np.array(source.convert("L"))
+
         if original_bytes is None:
             st.html('<div class="notice">이 단면에 영상이 있을 때 쓸 수 있어요.</div>')
         elif roi_enabled:
-            with Image.open(BytesIO(original_bytes)) as image:
-                source = image.convert("RGB")
-
-            gray = np.array(source.convert("L"))
             height, width = gray.shape
-
-            if is_dicom:
-                ct_slice = analysis_slice.ct_slice
-                roi_key = f"{viewer_id}_{ct_slice.series_instance_uid}_{ct_slice.sop_instance_uid}"
-            else:
-                image_id = sha256(original_bytes).hexdigest()
-                roi_key = f"{viewer_id}_mock_{slice_number}_{image_id}"
-            saved_bounds = roi_by_slice.get(roi_key)
             mode_key = f"roi_mode_{viewer_id}"
             st.session_state.setdefault(mode_key, ROI_MODES[0])
             st.segmented_control(
@@ -970,18 +1005,20 @@ def render_viewer(viewer_id):
                 stats_column.html(
                     '<div class="notice is-warning">가로와 세로 범위를 각각 한 픽셀 이상으로 골라 주세요.</div>'
                 )
-            else:
+        if original_bytes is not None and bounds is not None:
+            spacing = ct_slice.pixel_spacing_mm if ct_slice else None
+            roi, counts = summarize_roi(gray, bounds, spacing)
+            summary["roi"] = roi
+            if roi_enabled:
                 x0, x1, y0, y1 = bounds
-                roi_mean, counts = analyze_roi(gray, bounds)
-                pixel_count = int(counts.sum())
+                roi_mean = roi["mean_brightness"]
+                pixel_count = roi["pixel_count"]
 
                 roi_area_html = ""
-                if is_dicom:
-                    row_mm, col_mm = ct_slice.pixel_spacing_mm
-                    roi_area_mm2 = pixel_count * row_mm * col_mm
+                if roi["area_mm2"] is not None:
                     roi_area_html = (
                         f'<span class="metric-caption">'
-                        f'사각형 ROI 면적 {roi_area_mm2:,.2f} mm²</span>'
+                        f'사각형 ROI 면적 {roi["area_mm2"]:,.2f} mm²</span>'
                     )
 
                 if mode == "좌표 슬라이더" or raw_bounds is None:
@@ -1042,11 +1079,30 @@ def render_viewer(viewer_id):
                         use_container_width=True,
                     )
 
+    with st.container(border=True, key="card_measurement_summary", gap="medium"):
+        st.html(section_heading("04", "현재 단면 측정 요약", "", "section-summary"))
+        render_measurement_values(summary)
+        if original_bytes is None:
+            st.caption("영상이 있는 단면에서 측정값을 선택할 수 있어요.")
+        has_values = any(summary[key] is not None for key in ("roi", "tumor_area_cm2", "tumor_volume_ml"))
+        selected_by_case = st.session_state.setdefault("review_measurements", {})
+        if st.button(
+            "검토 기록에 사용할 측정값 선택",
+            key=f"select_measurement_{viewer_id}",
+            disabled=original_bytes is None or not has_values,
+        ):
+            selected_by_case[viewer_id] = deepcopy(summary)
+
+        selected = selected_by_case.get(viewer_id)
+        if selected is not None:
+            with st.expander(f"검토 기록용 측정값 · {selected['slice_number']}번 단면"):
+                render_measurement_values(selected)
+
     with st.container(border=True, key="card_memo", gap="medium"):
         with st.container(horizontal=True, vertical_alignment="center"):
             st.html(
                 section_heading(
-                    "04",
+                    "05",
                     "검토 메모",
                     "저장하면 현재 단면 번호가 함께 남습니다",
                     "section-memo",
