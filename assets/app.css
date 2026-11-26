@@ -881,6 +881,63 @@
   color: var(--ink-3);
 }
 
+.roi-result-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.roi-result-metrics > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+
+.roi-result-metrics strong {
+  color: var(--ink);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.roi-chart-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  color: var(--ink);
+}
+
+.roi-mean-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.roi-mean-legend::before {
+  content: "";
+  width: 18px;
+  border-top: 2px dashed var(--ink);
+}
+
+.st-key-card_histogram [data-testid="stExpander"] details {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.st-key-card_histogram [data-testid="stExpander"] summary {
+  padding: 8px 0;
+}
+
 [class*="st-key-tile_"] {
   background: var(--stage);
   border-radius: 14px;

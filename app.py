@@ -1014,13 +1014,6 @@ def render_viewer(viewer_id):
                 roi_mean = roi["mean_brightness"]
                 pixel_count = roi["pixel_count"]
 
-                roi_area_html = ""
-                if roi["area_mm2"] is not None:
-                    roi_area_html = (
-                        f'<span class="metric-caption">'
-                        f'사각형 ROI 면적 {roi["area_mm2"]:,.2f} mm²</span>'
-                    )
-
                 if mode == "좌표 슬라이더" or raw_bounds is None:
                     preview = source.copy()
                     ImageDraw.Draw(preview).rectangle(
@@ -1030,18 +1023,6 @@ def render_viewer(viewer_id):
                         st.image(preview, width="stretch")
                         st.html(f'<div class="tile-caption"><span>{slice_number}번 단면 · 선택한 ROI</span></div>')
 
-                stats_column.html(
-                    '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">'
-                    '<div class="metric is-slice"><span class="overline">ROI 평균 밝기</span>'
-                    f'<span class="metric-value">{roi_mean:.1f}<span class="metric-unit">/ 255</span></span></div>'
-                    '<div class="metric" style="background: var(--surface-2); justify-content: center">'
-                    '<span class="overline">선택 영역 (원본 픽셀)</span>'
-                    f'<span class="coords">x {x0}–{x1 - 1} · y {y0}–{y1 - 1}<br>{x1 - x0} × {y1 - y0} 픽셀</span>'
-                    f'<span class="metric-caption">총 {pixel_count:,}픽셀</span>'
-                    f'{roi_area_html}'
-                    "</div></div>"
-                )
-
                 histogram = pd.DataFrame({"brightness": np.arange(256), "pixels": counts})
                 bars = (
                     alt.Chart(histogram)
@@ -1049,35 +1030,47 @@ def render_viewer(viewer_id):
                     .encode(
                         x=alt.X(
                             "brightness:Q",
-                            title="픽셀 밝기 (0~255)",
+                            title="픽셀 밝기",
                             scale=alt.Scale(domain=[0, 255], nice=False),
-                            axis=alt.Axis(values=[0, 64, 128, 192, 255]),
+                            axis=alt.Axis(values=[0, 64, 128, 192, 255], grid=False),
                         ),
-                        y=alt.Y("pixels:Q", title="픽셀 수"),
+                        y=alt.Y(
+                            "pixels:Q",
+                            title="픽셀 수",
+                            axis=alt.Axis(grid=True, tickCount=4, tickMinStep=1),
+                        ),
                         tooltip=[
                             alt.Tooltip("brightness:Q", title="밝기"),
                             alt.Tooltip("pixels:Q", title="픽셀 수"),
                         ],
                     )
                 )
-                mean_data = alt.Data(values=[{"mean": float(roi_mean), "label": f"평균 {roi_mean:.1f}"}])
                 mean_rule = (
-                    alt.Chart(mean_data)
+                    alt.Chart(alt.Data(values=[{"mean": roi_mean}]))
                     .mark_rule(color=INK, strokeDash=[4, 3], strokeWidth=1.5)
                     .encode(x="mean:Q")
                 )
-                mean_label = (
-                    alt.Chart(mean_data)
-                    .mark_text(align="left", dx=6, font=MONO_FONT, fontSize=11, fontWeight=500, color=INK)
-                    .encode(x="mean:Q", y=alt.value(8), text="label:N")
-                )
-                with stats_column.container(border=True, key="card_histogram"):
-                    st.html('<span class="overline">밝기 분포</span>')
-                    st.altair_chart(
-                        chart_axis_style(alt.layer(bars, mean_rule, mean_label).properties(height=190)),
-                        theme=None,
-                        use_container_width=True,
+                with stats_column.container(border=True, key="card_histogram", gap="small"):
+                    st.html(
+                        '<div class="roi-result-metrics">'
+                        f'<div>평균 밝기 <strong>{roi_mean:.1f}</strong></div>'
+                        f'<div>선택 크기 <strong>{x1 - x0} × {y1 - y0} px</strong>'
+                        f'<span>총 {pixel_count:,}픽셀</span></div>'
+                        '</div>'
+                        '<div class="roi-chart-heading">'
+                        '<strong>밝기 분포</strong>'
+                        '<span class="roi-mean-legend">평균</span>'
+                        '</div>'
                     )
+                    st.altair_chart(
+                        chart_axis_style(alt.layer(bars, mean_rule).properties(height=160)),
+                        theme=None,
+                        width="stretch",
+                    )
+                    with st.expander("ROI 상세정보"):
+                        st.caption(f"선택 범위 · x {x0}–{x1 - 1}, y {y0}–{y1 - 1}")
+                        if roi["area_mm2"] is not None:
+                            st.caption(f"사각형 ROI 면적 · {roi['area_mm2']:,.2f} mm²")
 
     with st.container(border=True, key="card_measurement_summary", gap="medium"):
         st.html(section_heading("04", "현재 단면 측정 요약", "", "section-summary"))
