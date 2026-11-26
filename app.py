@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw
 
+from case_list import case_display_name
 from ct_analysis import TumorMeasurement, build_analysis_slices, measure_tumor
 from ct_case import has_case_ct_reference, load_case_ct, load_case_seg
 from dicom_ct import (
@@ -51,7 +52,12 @@ PROCESSING_METHODS = [
     "2D 연결 성분 분석",
 ]
 ROI_MODES = ["영상에서 드래그", "좌표 슬라이더"]
-SOURCE_LABELS = {"dicom": "DICOM CT", "mock": "모의 CT", "uploaded_png": "첨부한 PNG"}
+SOURCE_LABELS = {
+    "dicom": "DICOM CT",
+    "synthetic_dicom": "합성 DICOM CT",
+    "mock": "모의 CT",
+    "uploaded_png": "첨부한 PNG",
+}
 LOGO_SVG = (
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5CE7C4" '
     'stroke-width="2" stroke-linecap="round" aria-hidden="true">'
@@ -216,13 +222,13 @@ def status_badge(status):
     return f'<span class="badge badge-{STATUS_STYLES[status][0]}">{status}</span>'
 
 
-def render_app_bar(case_id=None):
-    if case_id is None:
+def render_app_bar(case_name=None):
+    if case_name is None:
         crumbs = '<span class="is-current">케이스 목록</span>'
     else:
         crumbs = (
             '<span>케이스 목록</span><span aria-hidden="true">›</span>'
-            f'<span class="is-current mono">{escape(case_id)}</span>'
+            f'<span class="is-current mono">{escape(case_name)}</span>'
         )
     st.html(
         '<header class="appbar"><div class="appbar-inner">'
@@ -246,7 +252,8 @@ def section_heading(number, title, description, anchor):
 
 
 def render_measurement_values(summary):
-    st.caption(f"{summary['case_id']} · {summary['slice_number']}번 단면 · {SOURCE_LABELS[summary['source']]}")
+    name = case_display_name(cases[summary["case_id"]])
+    st.caption(f"{name} · {summary['slice_number']}번 단면 · {SOURCE_LABELS[summary['source']]}")
     area = summary["tumor_area_cm2"]
     volume = summary["tumor_volume_ml"]
     area_col, volume_col = st.columns(2)
@@ -369,6 +376,7 @@ def render_case_list():
 
         selected_id = selected_case["케이스 ID"]
         case = cases[selected_id]
+        display_name = escape(case_display_name(case))
         ct_slices, ct_error = load_case_ct(selected_id, case)
         registered_ct = has_case_ct_reference(case)
         slice_count = len(ct_slices) if ct_slices else selected_case["단면 수"]
@@ -399,7 +407,7 @@ def render_case_list():
             thumbnail = (
                 '<div class="thumb">'
                 f'<img src="{image_data_url(preview_bytes)}" '
-                f'alt="{escape(selected_id)} {preview_number}번 단면 미리보기">'
+                f'alt="{display_name} {preview_number}번 단면 미리보기">'
                 f'<span class="thumb-chip">{preview_number} / {slice_count} · 대표 단면</span>'
                 "</div>"
             )
@@ -416,7 +424,7 @@ def render_case_list():
             '<div class="detail-head">'
             '<span class="overline">선택한 케이스</span>'
             '<div class="detail-title">'
-            f'<span class="case-id">{escape(selected_id)}</span>'
+            f'<span class="case-id">{display_name}</span>'
             f"{status_badge(selected_case['검토 상태'])}"
             "</div></div>"
             f"{thumbnail}"
@@ -470,7 +478,8 @@ def render_viewer(viewer_id):
         move_to_slice(slice_key, st.session_state.get(slice_key, 1), total_slices)
         slice_number = st.session_state[slice_key]
 
-    render_app_bar(viewer_id)
+    display_name = case_display_name(case)
+    render_app_bar(display_name)
 
     with st.container(horizontal=True, vertical_alignment="center", gap="medium"):
         st.button(
@@ -489,7 +498,7 @@ def render_viewer(viewer_id):
         st.html(
             '<div class="viewer-title">'
             '<div class="viewer-title-row">'
-            f'<h1 class="viewer-id">{escape(viewer_id)}</h1>{status_badge(viewer_status)}'
+            f'<h1 class="viewer-id">{escape(display_name)}</h1>{status_badge(viewer_status)}'
             "</div>"
             f'<span class="caption">{escape(meta)}</span>'
             "</div>",
@@ -567,6 +576,8 @@ def render_viewer(viewer_id):
 
     ct_slice = analysis_slice.ct_slice if is_dicom else None
     source_kind = "dicom" if is_dicom else "mock"
+    if is_dicom and case.get("synthetic"):
+        source_kind = "synthetic_dicom"
     image_hash = None
     roi_key = None
     if ct_slice is not None:

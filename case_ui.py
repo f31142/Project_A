@@ -13,6 +13,7 @@ app.py는 아래 네 함수만 부릅니다. 나머지(저장·검사·목록 �
 """
 
 import os
+from json import loads
 from pathlib import Path
 
 import pandas as pd
@@ -20,7 +21,9 @@ import streamlit as st
 
 from case_list import (
     ALL_STATUSES,
+    SOURCE_DEMO,
     SOURCE_STORED,
+    case_display_name,
     case_record,
     count_by_status,
     displayed_status,
@@ -105,6 +108,36 @@ def _with_server_path(case, storage):
     return case
 
 
+def _load_synthetic_hcc_001():
+    directory = APP_DIR / "assets" / "synthetic_ct" / "HCC_001"
+    ct_directory = directory / "ct"
+    seg_path = directory / "seg.dcm"
+    if not ct_directory.is_dir() or not seg_path.is_file():
+        return None
+
+    try:
+        metadata = loads((directory / "case.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(metadata, dict) or metadata.get("synthetic") is not True:
+        return None
+    series_uid = metadata.get("series_uid")
+    if not isinstance(series_uid, str) or not series_uid:
+        return None
+
+    # A separate key keeps test measurements and notes apart from a registered HCC_001.
+    case = case_record("demo:HCC_001", metadata, SOURCE_DEMO)
+    case.update(
+        display_name="HCC_001 (AI 생성 테스트용 이미지)",
+        exam="치료 전 CT · 합성 실험용",
+        image_ref=str(ct_directory),
+        seg_ref=str(seg_path),
+        series_uid=series_uid,
+        synthetic=True,
+    )
+    return case
+
+
 # ---------------------------------------------------------------------------
 # app.py가 부르는 함수
 # ---------------------------------------------------------------------------
@@ -125,9 +158,12 @@ def load_cases(demo_cases):
     st.session_state[KEY_LOAD_ERROR] = error
 
     cases = merge_cases(stored_docs, demo_cases)
+    synthetic_case = _load_synthetic_hcc_001()
+    if synthetic_case is not None:
+        cases[synthetic_case["case_id"]] = synthetic_case
     for case in cases.values():
         _with_server_path(case, storage)
-    return cases
+    return dict(sorted(cases.items(), key=lambda entry: case_display_name(entry[1])))
 
 
 def render_storage_notice():
@@ -268,7 +304,9 @@ def render_case_table(cases, review_statuses, statuses, status_marks):
     selected = None
     if rows:
         table_key = "case_table_" + "_".join(row["케이스 ID"] for row in rows)
-        table = pd.DataFrame(rows).style.format(
+        table = pd.DataFrame(rows)
+        table["케이스 ID"] = [case_display_name(cases[row["케이스 ID"]]) for row in rows]
+        table = table.style.format(
             lambda status: f"{status_marks.get(status, '·')}  {status}",
             subset=["검토 상태"],
         )
@@ -281,7 +319,7 @@ def render_case_table(cases, review_statuses, statuses, status_marks):
             width="stretch",
             row_height=48,
             column_config={
-                "케이스 ID": st.column_config.TextColumn("케이스 ID"),
+                "케이스 ID": st.column_config.TextColumn("케이스 ID", width=235),
                 "검사 종류": st.column_config.TextColumn("검사 종류"),
                 "단면 수": st.column_config.NumberColumn("단면 수", format="%d장"),
                 "검토 상태": st.column_config.TextColumn("검토 상태"),
