@@ -19,6 +19,7 @@ from dicom_ct import (
     render_ct_png,
     render_ct_preview_sheet,
 )
+from roi_analysis import analyze_roi
 
 APP_DIR = Path(__file__).resolve().parent
 MOCK_CT_DIR = APP_DIR / "assets" / "mock_ct"
@@ -931,7 +932,7 @@ def render_viewer(viewer_id):
                 )
             else:
                 x0, x1, y0, y1 = bounds
-                roi = gray[y0:y1, x0:x1]
+                roi_mean, counts = analyze_roi(gray, bounds)
 
                 if mode == "좌표 슬라이더":
                     preview = source.copy()
@@ -942,7 +943,6 @@ def render_viewer(viewer_id):
                         st.image(preview, width="stretch")
                         st.html('<div class="tile-caption"><span>선택한 ROI</span></div>')
 
-                roi_mean = roi.mean()
                 stats_column.html(
                     '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">'
                     '<div class="metric is-slice"><span class="overline">ROI 평균 밝기</span>'
@@ -953,7 +953,6 @@ def render_viewer(viewer_id):
                     "</div></div>"
                 )
 
-                counts = np.bincount(roi.ravel(), minlength=256)
                 histogram = pd.DataFrame({"brightness": np.arange(256), "pixels": counts})
                 bars = (
                     alt.Chart(histogram)
