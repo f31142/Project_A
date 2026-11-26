@@ -668,7 +668,8 @@ def render_viewer(viewer_id):
                     labelPadding=8,
                 ),
             )
-            max_area = max(areas_cm2.values())
+            max_area_slice = max(areas_cm2, key=areas_cm2.get)
+            max_area = areas_cm2[max_area_slice]
             y = alt.Y(
                 "area_cm2:Q",
                 axis=None,
@@ -711,6 +712,13 @@ def render_viewer(viewer_id):
                 theme=None,
                 width="stretch",
             )
+            st.button(
+                f"최대 면적 단면 보기 · {max_area_slice}번",
+                key=f"max_area_slice_{viewer_id}",
+                on_click=move_to_slice,
+                args=(slice_key, max_area_slice, total_slices),
+                disabled=slice_number == max_area_slice,
+            )
 
     with side_col:
         current_area = areas_cm2.get(slice_number)
@@ -723,7 +731,14 @@ def render_viewer(viewer_id):
         else:
             slice_value = '<span class="metric-value is-empty">측정값 없음</span>'
             if is_dicom:
-                slice_caption = "이 단면의 측정값이 없어요"
+                if measurement is not None:
+                    slice_caption = "이 단면에 SEG로 표시된 종양 영역이 없어요."
+                elif seg_error:
+                    slice_caption = seg_error
+                elif seg_source is None:
+                    slice_caption = "이 케이스에 연결된 DICOM SEG가 없어요."
+                else:
+                    slice_caption = "SEG에 측정할 종양 영역이 없어요."
             elif areas_cm2:
                 measured = " · ".join(str(number) for number in sorted(areas_cm2))
                 slice_caption = f"{measured}번 단면에 측정값이 있어요"
@@ -746,7 +761,7 @@ def render_viewer(viewer_id):
         st.html(
             '<div class="metric is-slice">'
             f'<span class="overline"><span class="dot"></span>이 단면 · {slice_number} / {total_slices}</span>'
-            f'{slice_value}<span class="metric-caption">{slice_caption}</span>'
+            f'{slice_value}<span class="metric-caption">{escape(slice_caption)}</span>'
             "</div>"
             '<div class="metric" style="margin-top: 12px">'
             '<span class="overline">케이스 전체</span>'
@@ -943,6 +958,16 @@ def render_viewer(viewer_id):
             else:
                 x0, x1, y0, y1 = bounds
                 roi_mean, counts = analyze_roi(gray, bounds)
+                pixel_count = int(counts.sum())
+
+                roi_area_html = ""
+                if is_dicom:
+                    row_mm, col_mm = ct_slice.pixel_spacing_mm
+                    roi_area_mm2 = pixel_count * row_mm * col_mm
+                    roi_area_html = (
+                        f'<span class="metric-caption">'
+                        f'사각형 ROI 면적 {roi_area_mm2:,.2f} mm²</span>'
+                    )
 
                 if mode == "좌표 슬라이더" or raw_bounds is None:
                     preview = source.copy()
@@ -960,6 +985,8 @@ def render_viewer(viewer_id):
                     '<div class="metric" style="background: var(--surface-2); justify-content: center">'
                     '<span class="overline">선택 영역 (원본 픽셀)</span>'
                     f'<span class="coords">x {x0}–{x1 - 1} · y {y0}–{y1 - 1}<br>{x1 - x0} × {y1 - y0} 픽셀</span>'
+                    f'<span class="metric-caption">총 {pixel_count:,}픽셀</span>'
+                    f'{roi_area_html}'
                     "</div></div>"
                 )
 
