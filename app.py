@@ -44,10 +44,10 @@ STATUS_STYLES = {
     "검토 완료": ("done", "✓"),
 }
 PROCESSING_METHODS = [
-    "밝기 보정",
     "CLAHE 대비 보정",
-    "가우시안 노이즈 완화",
+    "양방향 필터",
     "Canny 경계 검출",
+    "2D 연결 성분 분석",
 ]
 ROI_MODES = ["영상에서 드래그", "좌표 슬라이더"]
 LOGO_SVG = (
@@ -824,12 +824,24 @@ def render_viewer(viewer_id):
             controls_column, images_column = st.columns([1, 2.6], gap="large")
 
             with controls_column:
+                use_brightness = st.checkbox(
+                    "기본 밝기 보정 사용",
+                    key=f"brightness_enabled_{viewer_id}",
+                )
                 method = st.radio(
                     "영상처리 도구",
                     PROCESSING_METHODS,
-                    captions=["", "처리 함수 연결 예정", "처리 함수 연결 예정", "처리 함수 연결 예정"],
-                    key=f"processing_method_{viewer_id}",
+                    captions=[
+                        "CT의 부분별 명암 차이를 강조해요.",
+                        "경계를 유지하면서 잔잔한 노이즈를 줄여요.",
+                        "밝기가 급격히 바뀌는 부분을 선으로 표시해요.",
+                        "SEG에서 서로 떨어진 영역을 구분해 면적을 살펴봐요.",
+                    ],
+                    disabled=use_brightness,
+                    key=f"processing_method_algorithm_{viewer_id}",
                 )
+                if use_brightness:
+                    method = "밝기 보정"
 
                 with Image.open(BytesIO(original_bytes)) as image:
                     original = np.array(image.convert("RGB"))
@@ -856,11 +868,14 @@ def render_viewer(viewer_id):
                     st.slider("대비 제한값", 1.0, 5.0, 2.0, 0.1)
                     st.select_slider("가로·세로 타일 수", options=[4, 8, 16], value=8)
 
-                elif method == "가우시안 노이즈 완화":
-                    st.select_slider("커널 크기", options=[3, 5, 7, 9], value=5)
+                elif method == "양방향 필터":
+                    st.slider("밝기 차이 허용 정도", 1, 150, 50)
 
                 elif method == "Canny 경계 검출":
                     st.slider("경계 임계값", 0, 255, (50, 150))
+
+                elif method == "2D 연결 성분 분석":
+                    st.caption("현재 단면의 종양 SEG를 사용해 영역별 면적을 계산할 예정이에요.")
 
             with images_column:
                 original_column, result_column = st.columns(2, gap="medium")
