@@ -54,6 +54,12 @@
 
 /* ---------- 상단 바 ---------- */
 
+/* Keep the fixed header opaque while Streamlit refreshes the viewer. */
+[data-testid="stElementContainer"][data-stale="true"]:has(.appbar) {
+  opacity: 1;
+  transition: none;
+}
+
 .appbar {
   position: fixed;
   inset: 0 0 auto 0;
@@ -614,6 +620,97 @@
   max-width: 560px;
   aspect-ratio: 1 / 1;
   border-radius: 8px;
+}
+
+.ct-view-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  width: 100%;
+  max-width: 512px;
+  margin: 0 auto 8px;
+}
+
+.ct-view-controls button {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--stage-line);
+  border-radius: 8px;
+  background: var(--stage-2);
+  color: var(--stage-ink);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ct-view-controls button:enabled:hover {
+  border-color: var(--mint);
+  color: var(--mint);
+}
+
+.ct-view-controls button:disabled {
+  opacity: .48;
+  cursor: default;
+}
+
+.ct-view-controls output {
+  min-width: 48px;
+  color: var(--stage-ink);
+  font: 12px var(--mono);
+  text-align: center;
+}
+
+.ct-view-controls button:focus-visible,
+.ct-slice-preview:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 2px;
+}
+
+.ct-slice-preview {
+  position: relative;
+  width: 100%;
+  max-width: 512px;
+  aspect-ratio: 1;
+  margin: 0 auto;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ct-slice-preview.is-zoomed {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.ct-slice-preview.is-panning {
+  cursor: grabbing;
+}
+
+.st-key-stage_image [class*="st-key-ct_full_slice_"],
+.st-key-stage_image .st-key-ct_preview_sheet {
+  display: none;
+}
+
+.ct-view-content {
+  position: absolute;
+  inset: 0;
+}
+
+.ct-view-content > img,
+.ct-view-content > canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.ct-view-content > canvas {
+  pointer-events: none;
 }
 
 .stage-empty {
