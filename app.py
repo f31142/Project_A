@@ -1,7 +1,6 @@
 from base64 import b64encode
 from html import escape
 from io import BytesIO
-from math import ceil, floor
 from pathlib import Path
 
 import altair as alt
@@ -19,7 +18,7 @@ from dicom_ct import (
     render_ct_png,
     render_ct_preview_sheet,
 )
-from roi_analysis import analyze_roi
+from roi_analysis import analyze_roi, normalize_roi_bounds
 
 APP_DIR = Path(__file__).resolve().parent
 MOCK_CT_DIR = APP_DIR / "assets" / "mock_ct"
@@ -146,12 +145,7 @@ def select_roi_by_drag(source, key):
     if not box.get("x") or not box.get("y"):
         return None
 
-    return (
-        max(0, floor(min(box["x"]))),
-        min(width, ceil(max(box["x"]))),
-        max(0, floor(min(box["y"]))),
-        min(height, ceil(max(box["y"]))),
-    )
+    return box["x"][0], box["x"][1], box["y"][0], box["y"][1]
 
 
 initial_cases = {
@@ -911,7 +905,7 @@ def render_viewer(viewer_id):
 
             if mode == "영상에서 드래그":
                 with preview_column.container(key="tile_roi"):
-                    bounds = select_roi_by_drag(source, roi_key)
+                    raw_bounds = select_roi_by_drag(source, roi_key)
                     st.html('<div class="tile-caption"><span>영상 위를 드래그해 상자를 그립니다</span></div>')
             else:
                 x_key = f"roi_x_{roi_key}"
@@ -920,13 +914,14 @@ def render_viewer(viewer_id):
                 st.session_state.setdefault(y_key, (height // 4, height - height // 4))
                 x0, x1 = preview_column.slider("가로 범위 (x)", 0, width, key=x_key)
                 y0, y1 = preview_column.slider("세로 범위 (y)", 0, height, key=y_key)
-                bounds = x0, x1, y0, y1
+                raw_bounds = x0, x1, y0, y1
 
-            if bounds is None:
+            bounds = normalize_roi_bounds(raw_bounds, width, height)
+            if raw_bounds is None:
                 stats_column.html(
                     '<div class="notice">CT 위에서 드래그해 관심 영역을 선택해 주세요.</div>'
                 )
-            elif bounds[0] >= bounds[1] or bounds[2] >= bounds[3]:
+            elif bounds is None:
                 stats_column.html(
                     '<div class="notice is-warning">가로와 세로 범위를 각각 한 픽셀 이상으로 골라 주세요.</div>'
                 )
