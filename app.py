@@ -1,4 +1,5 @@
 from base64 import b64encode
+from hashlib import sha256
 from html import escape
 from io import BytesIO
 from pathlib import Path
@@ -65,8 +66,6 @@ PERSISTENT_KEY_PREFIXES = (
     "brightness_",
     "show_roi_",
     "roi_mode_",
-    "roi_x_",
-    "roi_y_",
 )
 
 st.set_page_config(page_title="간 CT 검토실", layout="wide")
@@ -174,6 +173,7 @@ mock_measurements = {
 review_statuses = st.session_state.setdefault("review_statuses", {})
 uploads_by_case = st.session_state.setdefault("uploaded_ct_images", {})
 notes_by_case = st.session_state.setdefault("review_notes", {})
+roi_by_slice = st.session_state.setdefault("roi_by_slice", {})
 
 
 
@@ -890,7 +890,13 @@ def render_viewer(viewer_id):
             gray = np.array(source.convert("L"))
             height, width = gray.shape
 
-            roi_key = f"{viewer_id}_{slice_number}"
+            if is_dicom:
+                ct_slice = analysis_slice.ct_slice
+                roi_key = f"{viewer_id}_{ct_slice.series_instance_uid}_{ct_slice.sop_instance_uid}"
+            else:
+                image_id = sha256(original_bytes).hexdigest()
+                roi_key = f"{viewer_id}_mock_{slice_number}_{image_id}"
+            saved_bounds = roi_by_slice.get(roi_key)
             mode_key = f"roi_mode_{viewer_id}"
             st.session_state.setdefault(mode_key, ROI_MODES[0])
             st.segmented_control(
@@ -903,21 +909,30 @@ def render_viewer(viewer_id):
             mode = st.session_state.get(mode_key) or ROI_MODES[0]
             preview_column, stats_column = st.columns([1, 1.25], gap="large")
 
-            if mode == "영상에서 드래그":
-                with preview_column.container(key="tile_roi"):
-                    raw_bounds = select_roi_by_drag(source, roi_key)
-                    st.html('<div class="tile-caption"><span>영상 위를 드래그해 상자를 그립니다</span></div>')
-            else:
+            if mode == "좌표 슬라이더":
                 x_key = f"roi_x_{roi_key}"
                 y_key = f"roi_y_{roi_key}"
-                st.session_state.setdefault(x_key, (width // 4, width - width // 4))
-                st.session_state.setdefault(y_key, (height // 4, height - height // 4))
+                default_x = saved_bounds[:2] if saved_bounds else (width // 4, width - width // 4)
+                default_y = saved_bounds[2:] if saved_bounds else (height // 4, height - height // 4)
+                st.session_state.setdefault(x_key, default_x)
+                st.session_state.setdefault(y_key, default_y)
                 x0, x1 = preview_column.slider("가로 범위 (x)", 0, width, key=x_key)
                 y0, y1 = preview_column.slider("세로 범위 (y)", 0, height, key=y_key)
                 raw_bounds = x0, x1, y0, y1
 
+            roi_preview = preview_column.container(key="tile_roi")
+            if mode == "영상에서 드래그":
+                with roi_preview:
+                    raw_bounds = select_roi_by_drag(source, roi_key)
+                    st.html('<div class="tile-caption"><span>영상 위를 드래그해 상자를 그립니다</span></div>')
+
             bounds = normalize_roi_bounds(raw_bounds, width, height)
             if raw_bounds is None:
+                bounds = saved_bounds
+            elif bounds is not None:
+                roi_by_slice[roi_key] = bounds
+
+            if bounds is None and raw_bounds is None:
                 stats_column.html(
                     '<div class="notice">CT 위에서 드래그해 관심 영역을 선택해 주세요.</div>'
                 )
@@ -929,14 +944,14 @@ def render_viewer(viewer_id):
                 x0, x1, y0, y1 = bounds
                 roi_mean, counts = analyze_roi(gray, bounds)
 
-                if mode == "좌표 슬라이더":
+                if mode == "좌표 슬라이더" or raw_bounds is None:
                     preview = source.copy()
                     ImageDraw.Draw(preview).rectangle(
                         (x0, y0, x1 - 1, y1 - 1), outline=MINT, width=3,
                     )
-                    with preview_column.container(key="tile_roi"):
+                    with roi_preview:
                         st.image(preview, width="stretch")
-                        st.html('<div class="tile-caption"><span>선택한 ROI</span></div>')
+                        st.html(f'<div class="tile-caption"><span>{slice_number}번 단면 · 선택한 ROI</span></div>')
 
                 stats_column.html(
                     '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">'
