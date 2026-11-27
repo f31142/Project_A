@@ -159,7 +159,10 @@ initial_cases = {
     "HCC_018": {"exam": "치료 전 CT", "slice_count": 72},
 }
 
-cases = st.session_state.setdefault("cases", initial_cases)
+# A 담당(case_ui.py): Firestore에 등록된 케이스와 위 모의 케이스를 합쳐 읽습니다.
+import case_ui  # noqa: E402
+
+cases = case_ui.load_cases(initial_cases)
 
 mock_ct_images = {
     "HCC_004": {
@@ -316,6 +319,7 @@ def chart_axis_style(chart):
 
 def render_case_list():
     render_app_bar()
+    case_ui.render_storage_notice()
 
     title_col, action_col = st.columns([3, 1], vertical_alignment="bottom")
     title_col.html(
@@ -324,114 +328,17 @@ def render_case_list():
     )
     with action_col.container(horizontal=True, horizontal_alignment="right"):
         with st.popover("케이스 등록", icon=":material/add:"):
-            with st.form("register_case"):
-                case_id_input = st.text_input("새 케이스 ID", placeholder="예: HCC_025")
-                exam_type = st.selectbox("검사 종류", ["치료 전 CT", "치료 후 CT"])
-                new_slice_count = st.number_input("단면 수", min_value=1, value=1)
-                submitted = st.form_submit_button("등록", type="primary")
-
-            if submitted:
-                new_case_id = case_id_input.strip().upper()
-
-                if not new_case_id:
-                    st.warning("케이스 ID를 입력해 주세요.")
-                elif new_case_id in cases:
-                    st.warning("이미 등록된 케이스 ID예요.")
-                else:
-                    cases[new_case_id] = {
-                        "exam": exam_type,
-                        "slice_count": new_slice_count,
-                    }
-                    st.success(f"{new_case_id} 케이스를 등록했어요.")
+            case_ui.render_register_form(cases)
 
     list_col, detail_col = st.columns([2.3, 1], gap="large")
     selected_case = None
 
     with list_col:
-        search_col, filter_col = st.columns([1, 1.3], vertical_alignment="center")
-        query = search_col.text_input(
-            "케이스 ID 검색",
-            placeholder="케이스 ID 검색 · 예: 012",
-            key="case_query",
-            icon=":material/search:",
-            label_visibility="collapsed",
-        ).strip().casefold()
-
-        st.session_state.setdefault("status_filter", "전체")
-        with filter_col.container(horizontal=True, horizontal_alignment="right"):
-            st.segmented_control(
-                "검토 상태 필터",
-                ["전체"] + REVIEW_STATUSES,
-                key="status_filter",
-                on_change=keep_choice,
-                args=("status_filter", "전체"),
-                label_visibility="collapsed",
-            )
-        status_filter = st.session_state.get("status_filter") or "전체"
-
-        rows = []
-        for case_id, case in cases.items():
-            status = review_statuses.get(case_id, "검토 대기")
-            matches_id = query in case_id.casefold()
-            matches_status = status_filter == "전체" or status == status_filter
-
-            if matches_id and matches_status:
-                rows.append({
-                    "케이스 ID": case_id,
-                    "검사 종류": case.get("exam") or "CT 검사",
-                    "단면 수": case.get("slice_count"),
-                    "검토 상태": status,
-                })
-
-        if rows:
-            table_key = "case_table_" + "_".join(row["케이스 ID"] for row in rows)
-            table = pd.DataFrame(rows).style.format(
-                lambda status: f"{STATUS_STYLES[status][1]}  {status}",
-                subset=["검토 상태"],
-            )
-            event = st.dataframe(
-                table,
-                key=table_key,
-                hide_index=True,
-                on_select="rerun",
-                selection_mode="single-row",
-                width="stretch",
-                row_height=48,
-                column_config={
-                    "케이스 ID": st.column_config.TextColumn("케이스 ID"),
-                    "검사 종류": st.column_config.TextColumn("검사 종류"),
-                    "단면 수": st.column_config.NumberColumn("단면 수", format="%d장"),
-                    "검토 상태": st.column_config.TextColumn("검토 상태"),
-                },
-            )
-
-            selected_rows = event.selection.rows
-            if selected_rows:
-                selected_case = rows[selected_rows[0]]
-                st.session_state["selected_case_id"] = selected_case["케이스 ID"]
-            else:
-                remembered_id = st.session_state.get("selected_case_id")
-                selected_case = next(
-                    (row for row in rows if row["케이스 ID"] == remembered_id),
-                    rows[0],
-                )
-        else:
-            st.html(
-                '<div class="empty">'
-                '<span class="empty-title">검색 조건에 맞는 케이스가 없어요</span>'
-                '<span class="empty-desc">검색어를 지우거나 상태 필터를 ‘전체’로 바꿔 보세요.</span>'
-                "</div>"
-            )
-
-        status_counts = " · ".join(
-            f"{status} {sum(review_statuses.get(case_id, '검토 대기') == status for case_id in cases)}"
-            for status in REVIEW_STATUSES
-        )
-        st.html(
-            '<div class="caption-row">'
-            f"<span>케이스 {len(rows)}개 · 행을 눌러 고릅니다</span>"
-            f"<span>{status_counts}</span>"
-            "</div>"
+        selected_case = case_ui.render_case_table(
+            cases,
+            review_statuses,
+            REVIEW_STATUSES,
+            {status: mark for status, (_, mark) in STATUS_STYLES.items()},
         )
 
     with detail_col.container(border=True, key="card_detail", gap="medium"):

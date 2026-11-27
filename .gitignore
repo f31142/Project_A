@@ -1,0 +1,21 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 비밀 설정: Firebase 서비스 계정 키 등은 저장소에 넣지 않습니다
+.streamlit/secrets.toml
+*serviceAccount*.json
+*firebase-adminsdk*.json
+
+# OS
+.DS_Store
+
+# 업로드한 CT 원본 (로컬 개발용 저장 폴더)
+data/
+
+# 수업 참고 자료 (로컬 보관, 저장소에 올리지 않음)
+*.pdf
+DICOM_데이터셋_50선_독립문서.html
