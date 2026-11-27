@@ -94,6 +94,10 @@ def normalize_query(query):
     return (query or "").strip().casefold()
 
 
+def case_display_name(case):
+    return case.get("display_name", case["case_id"])
+
+
 def filter_cases(cases, query="", status_filter=ALL_STATUSES, status_of=None):
     """케이스 ID 부분 일치(대소문자 무시)와 검토 상태로 걸러 레코드 목록을 돌려줍니다.
 
@@ -104,7 +108,7 @@ def filter_cases(cases, query="", status_filter=ALL_STATUSES, status_of=None):
     status_of = status_of or (lambda case: case["review_status"])
     return [
         case for case in cases.values()
-        if needle in case["case_id"].casefold()
+        if needle in case_display_name(case).casefold()
         and (status_filter == ALL_STATUSES or status_of(case) == status_filter)
     ]
 
