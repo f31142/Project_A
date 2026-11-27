@@ -371,6 +371,10 @@ STRINGS = {
         LANG_EN: "Select a region on the CT slice to inspect pixel intensity",
     },
     "sec_04_title": {LANG_KO: "현재 단면 측정 요약", LANG_EN: "Slice Measurement Summary"},
+    "sec_04_desc": {
+        LANG_KO: "현재 단면의 종양 수치와 ROI 결과를 검토 기록용으로 저장합니다",
+        LANG_EN: "Review slice metrics and save a snapshot to the review record",
+    },
     "sec_05_title": {LANG_KO: "검토 메모", LANG_EN: "Review Memo"},
     "sec_05_desc": {
         LANG_KO: "저장하면 현재 단면 번호가 함께 남습니다",
@@ -388,6 +392,7 @@ STRINGS = {
         LANG_KO: "1.0으로 돌리면 원본과 같아요.",
         LANG_EN: "Set to 1.0 to match the original image.",
     },
+    "brightness_reset": {LANG_KO: "밝기 초기화", LANG_EN: "Reset"},
     "clahe_clip": {LANG_KO: "대비 제한값", LANG_EN: "Clip Limit"},
     "clahe_tile": {LANG_KO: "가로·세로 타일 수", LANG_EN: "Tile Grid Size"},
     "bilateral_sigma": {LANG_KO: "밝기 차이 허용 정도", LANG_EN: "Intensity Sigma"},
@@ -450,8 +455,13 @@ STRINGS = {
         LANG_KO: "{name} · {slice_number}번 단면 · {source}",
         LANG_EN: "{name} · Slice {slice_number} · {source}",
     },
-    "summary_metric_area": {LANG_KO: "현재 단면의 종양 면적", LANG_EN: "Current Slice Tumor Area"},
-    "summary_metric_volume": {LANG_KO: "케이스 전체 종양 부피", LANG_EN: "Total Case Tumor Volume"},
+    "summary_metric_area": {LANG_KO: "현재 단면의 종양 면적", LANG_EN: "SLICE TUMOR AREA"},
+    "summary_metric_volume": {LANG_KO: "케이스 전체 종양 부피", LANG_EN: "TOTAL TUMOR VOLUME"},
+    "summary_metric_roi": {LANG_KO: "관심 영역(ROI) 요약", LANG_EN: "ROI SUMMARY"},
+    "summary_saved_badge": {
+        LANG_KO: "저장됨 · {slice_number}번 단면",
+        LANG_EN: "Saved · Slice #{slice_number}",
+    },
     "summary_no_roi": {LANG_KO: "선택한 ROI 없음", LANG_EN: "No ROI selected"},
     "summary_roi_line": {
         LANG_KO: "사각형 ROI · x {x0}–{x1}, y {y0}–{y1} · {pixels:,}픽셀 · 평균 밝기 {mean:.1f} / 255",

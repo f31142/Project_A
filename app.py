@@ -422,46 +422,76 @@ def section_heading(number, title, description, anchor):
     )
 
 
+def reset_brightness(brightness_key):
+    st.session_state[brightness_key] = 1.0
+
+
 def render_measurement_values(summary, lang=LANG_KO):
     name = label_case_name(cases[summary["case_id"]], lang)
-    st.caption(
-        t(
-            "summary_caption_line",
-            lang,
-            name=name,
-            slice_number=summary["slice_number"],
-            source=label_source(summary["source"], lang),
-        )
+    meta_line = t(
+        "summary_caption_line",
+        lang,
+        name=name,
+        slice_number=summary["slice_number"],
+        source=label_source(summary["source"], lang),
     )
     area = summary["tumor_area_cm2"]
     volume = summary["tumor_volume_ml"]
-    area_col, volume_col = st.columns(2)
-    area_col.metric(
-        t("summary_metric_area", lang),
-        f"{area:.1f} cm²" if area is not None else t("no_measurement", lang),
+    area_html = (
+        f'{area:.1f}<span class="summary-kpi-unit">cm²</span>'
+        if area is not None
+        else f'<span class="is-muted">{escape(t("no_measurement", lang))}</span>'
     )
-    volume_col.metric(
-        t("summary_metric_volume", lang),
-        f"{volume:.1f} mL" if volume is not None else t("no_measurement", lang),
+    volume_html = (
+        f'{volume:.1f}<span class="summary-kpi-unit">mL</span>'
+        if volume is not None
+        else f'<span class="is-muted">{escape(t("no_measurement", lang))}</span>'
     )
+
     roi = summary["roi"]
     if roi is None:
-        st.caption(t("summary_no_roi", lang))
-        return
-    bounds = roi["bounds"]
-    text = t(
-        "summary_roi_line",
-        lang,
-        x0=bounds["x0"],
-        x1=bounds["x1"] - 1,
-        y0=bounds["y0"],
-        y1=bounds["y1"] - 1,
-        pixels=roi["pixel_count"],
-        mean=roi["mean_brightness"],
+        roi_val_html = f'<span class="is-muted">{escape(t("summary_no_roi", lang))}</span>'
+        roi_sub_html = ""
+    else:
+        bounds = roi["bounds"]
+        w = bounds["x1"] - bounds["x0"]
+        h = bounds["y1"] - bounds["y0"]
+        roi_val_html = (
+            f'{roi["mean_brightness"]:.1f}<span class="summary-kpi-unit">/255</span>'
+            f' <span class="summary-kpi-sep">·</span> {w}×{h}<span class="summary-kpi-unit">px</span>'
+        )
+        sub_text = t(
+            "roi_bounds_caption",
+            lang,
+            x0=bounds["x0"],
+            x1=bounds["x1"] - 1,
+            y0=bounds["y0"],
+            y1=bounds["y1"] - 1,
+        )
+        if roi["area_mm2"] is not None:
+            sub_text += f' · {roi["area_mm2"]:,.1f} mm²'
+        roi_sub_html = f'<span class="summary-kpi-sub">{escape(sub_text)}</span>'
+
+    st.html(
+        '<div class="summary-strip">'
+        f'<div class="summary-meta">{escape(meta_line)}</div>'
+        '<div class="summary-kpi-grid">'
+        '<div class="summary-kpi-cell">'
+        f'<span class="summary-kpi-label">{escape(t("summary_metric_area", lang))}</span>'
+        f'<span class="summary-kpi-val">{area_html}</span>'
+        "</div>"
+        '<div class="summary-kpi-cell">'
+        f'<span class="summary-kpi-label">{escape(t("summary_metric_volume", lang))}</span>'
+        f'<span class="summary-kpi-val">{volume_html}</span>'
+        "</div>"
+        '<div class="summary-kpi-cell">'
+        f'<span class="summary-kpi-label">{escape(t("summary_metric_roi", lang))}</span>'
+        f'<span class="summary-kpi-val">{roi_val_html}</span>'
+        f"{roi_sub_html}"
+        "</div>"
+        "</div>"
+        "</div>"
     )
-    if roi["area_mm2"] is not None:
-        text += t("summary_roi_area_suffix", lang, area=roi["area_mm2"])
-    st.caption(text)
 
 
 def case_slice_numbers(case_id):
@@ -1201,49 +1231,7 @@ def render_viewer(viewer_id):
                 contour_caption = t("contour_caption_none", lang)
             st.html(f'<span class="caption">{escape(contour_caption)}</span>')
 
-        quick_roi_bounds = roi_by_slice.get(roi_key) if roi_key else None
-        if quick_roi_bounds is not None and original_bytes is not None:
-            with Image.open(BytesIO(original_bytes)) as _img:
-                _gray = np.array(_img.convert("L"))
-            _roi_quick, _ = summarize_roi(
-                _gray,
-                quick_roi_bounds,
-                ct_slice.pixel_spacing_mm if ct_slice else None,
-            )
-            _qx0, _qx1, _qy0, _qy1 = quick_roi_bounds
-            quick_roi_html = (
-                '<div class="quick-roi-line">'
-                f'{escape(t("quick_roi_value", lang, mean=_roi_quick["mean_brightness"], w=_qx1 - _qx0, h=_qy1 - _qy0))}'
-                "</div>"
-            )
-        else:
-            quick_roi_html = (
-                f'<div class="quick-roi-line is-empty">{escape(t("quick_roi_empty", lang))}</div>'
-            )
-
-        if case_notes:
-            recent_items = "".join(
-                "<li>"
-                f'<span class="quick-memo-tag">#{saved_note["slice_number"]}</span>'
-                f'<span class="quick-memo-text">{escape(saved_note["text"])}</span>'
-                "</li>"
-                for saved_note in list(reversed(case_notes))[:2]
-            )
-            quick_memo_html = f'<ul class="quick-memo-list">{recent_items}</ul>'
-        else:
-            quick_memo_html = f'<span class="caption">{escape(t("quick_memo_empty", lang))}</span>'
-
-        st.html(
-            '<div class="quick-card">'
-            f'<span class="overline">{escape(t("quick_metrics_overline", lang))}</span>'
-            f"{quick_roi_html}"
-            f"{quick_memo_html}"
-            '<div class="quick-card-links">'
-            f'<a href="#section-roi">{escape(t("quick_open_roi", lang))} →</a>'
-            f'<a href="#section-memo">{escape(t("quick_open_memo", lang))} →</a>'
-            "</div>"
-            "</div>"
-        )
+        quick_card_slot = st.empty()
 
     with st.container(border=True, key="card_processing", gap="medium"):
         with st.container(horizontal=True, vertical_alignment="center"):
@@ -1288,6 +1276,7 @@ def render_viewer(viewer_id):
 
                 result = None
                 factor = 1.0
+                param_badge = ""
 
                 if method == "밝기 보정":
                     brightness_key = f"brightness_{viewer_id}"
@@ -1302,20 +1291,33 @@ def render_viewer(viewer_id):
                     )
                     scaled = original.astype(np.float32) * factor
                     result = np.clip(scaled, 0, 255).astype(np.uint8)
+                    param_badge = f"×{factor:.1f}"
                     st.html(f'<span class="caption">{escape(t("brightness_hint", lang))}</span>')
+                    st.button(
+                        t("brightness_reset", lang),
+                        key=f"reset_brightness_{viewer_id}",
+                        type="secondary",
+                        on_click=reset_brightness,
+                        args=(brightness_key,),
+                        disabled=abs(factor - 1.0) < 1e-6,
+                    )
 
                 elif method == "CLAHE 대비 보정":
-                    st.slider(t("clahe_clip", lang), 1.0, 5.0, 2.0, 0.1)
-                    st.select_slider(t("clahe_tile", lang), options=[4, 8, 16], value=8)
+                    clip_val = st.slider(t("clahe_clip", lang), 1.0, 5.0, 2.0, 0.1)
+                    tile_val = st.select_slider(t("clahe_tile", lang), options=[4, 8, 16], value=8)
+                    param_badge = f"{clip_val:.1f} · {tile_val}×{tile_val}"
 
                 elif method == "양방향 필터":
-                    st.slider(t("bilateral_sigma", lang), 1, 150, 50)
+                    sigma_val = st.slider(t("bilateral_sigma", lang), 1, 150, 50)
+                    param_badge = f"σ {sigma_val}"
 
                 elif method == "Canny 경계 검출":
-                    st.slider(t("canny_thresh", lang), 0, 255, (50, 150))
+                    low_t, high_t = st.slider(t("canny_thresh", lang), 0, 255, (50, 150))
+                    param_badge = f"{low_t}–{high_t}"
 
                 elif method == "2D 연결 성분 분석":
                     st.caption(t("cc_caption", lang))
+                    param_badge = "2D CC"
 
             with images_column:
                 original_column, result_column = st.columns(2, gap="medium")
@@ -1324,7 +1326,7 @@ def render_viewer(viewer_id):
                     st.html(
                         '<div class="tile-caption">'
                         f'<span>{escape(t("tile_original", lang, slice_number=slice_number))}</span>'
-                        '<span class="mono">×1.0</span></div>'
+                        '<span class="tile-pill">×1.0</span></div>'
                     )
                 with result_column.container(key="tile_result"):
                     method_label = label_method(method, lang)
@@ -1333,9 +1335,11 @@ def render_viewer(viewer_id):
                     )
                     if result is None:
                         st.html(f'<div class="tile-empty">{escape(t("tile_empty", lang))}</div>')
+                        if param_badge:
+                            result_caption += f'<span class="tile-pill">{escape(param_badge)}</span>'
                     else:
                         st.image(result, width="stretch")
-                        result_caption += f'<span class="mono is-accent">×{factor:.1f}</span>'
+                        result_caption += f'<span class="mono is-accent">{escape(param_badge)}</span>'
                     st.html(f'<div class="tile-caption">{result_caption}</div>')
 
     with st.container(border=True, key="card_roi", gap="medium"):
@@ -1533,21 +1537,38 @@ def render_viewer(viewer_id):
                             st.caption(t("roi_area_caption", lang, area=roi["area_mm2"]))
 
     with st.container(border=True, key="card_measurement_summary", gap="medium"):
-        st.html(section_heading("04", t("sec_04_title", lang), "", "section-summary"))
+        selected_by_case = st.session_state.setdefault("review_measurements", {})
+        has_values = any(summary[key] is not None for key in ("roi", "tumor_area_cm2", "tumor_volume_ml"))
+        with st.container(horizontal=True, vertical_alignment="center", gap="medium"):
+            st.html(
+                section_heading(
+                    "04",
+                    t("sec_04_title", lang),
+                    t("sec_04_desc", lang),
+                    "section-summary",
+                ),
+                width="stretch",
+            )
+            if st.button(
+                t("select_measurement_btn", lang),
+                key=f"select_measurement_{viewer_id}",
+                type="primary" if selected_by_case.get(viewer_id) is None else "secondary",
+                icon=":material/bookmark_added:" if selected_by_case.get(viewer_id) is not None else ":material/bookmark_add:",
+                disabled=original_bytes is None or not has_values,
+            ):
+                selected_by_case[viewer_id] = deepcopy(summary)
+
         render_measurement_values(summary, lang=lang)
         if original_bytes is None:
             st.caption(t("summary_need_image", lang))
-        has_values = any(summary[key] is not None for key in ("roi", "tumor_area_cm2", "tumor_volume_ml"))
-        selected_by_case = st.session_state.setdefault("review_measurements", {})
-        if st.button(
-            t("select_measurement_btn", lang),
-            key=f"select_measurement_{viewer_id}",
-            disabled=original_bytes is None or not has_values,
-        ):
-            selected_by_case[viewer_id] = deepcopy(summary)
 
         selected = selected_by_case.get(viewer_id)
         if selected is not None:
+            st.html(
+                '<div class="summary-saved-row">'
+                f'<span class="summary-saved-pill">✓ {escape(t("summary_saved_badge", lang, slice_number=selected["slice_number"]))}</span>'
+                "</div>"
+            )
             with st.expander(
                 t("saved_measurement_expander", lang, slice_number=selected["slice_number"])
             ):
@@ -1593,7 +1614,7 @@ def render_viewer(viewer_id):
                     st.warning(t("memo_empty_warning", lang))
 
         note_count_slot.html(
-            f'<span class="caption mono">{escape(t("memo_count", lang, count=len(case_notes)))}</span>',
+            f'<span class="memo-count-pill">{escape(t("memo_count", lang, count=len(case_notes)))}</span>',
             width="content",
         )
 
@@ -1615,6 +1636,43 @@ def render_viewer(viewer_id):
                     f'<span class="empty-desc">{escape(t("memo_empty_desc", lang))}</span>'
                     "</div>"
                 )
+
+    quick_roi = summary.get("roi")
+    if quick_roi is not None:
+        _qb = quick_roi["bounds"]
+        quick_roi_html = (
+            '<div class="quick-roi-line">'
+            f'{escape(t("quick_roi_value", lang, mean=quick_roi["mean_brightness"], w=_qb["x1"] - _qb["x0"], h=_qb["y1"] - _qb["y0"]))}'
+            "</div>"
+        )
+    else:
+        quick_roi_html = (
+            f'<div class="quick-roi-line is-empty">{escape(t("quick_roi_empty", lang))}</div>'
+        )
+
+    if case_notes:
+        recent_items = "".join(
+            "<li>"
+            f'<span class="quick-memo-tag">#{saved_note["slice_number"]}</span>'
+            f'<span class="quick-memo-text">{escape(saved_note["text"])}</span>'
+            "</li>"
+            for saved_note in list(reversed(case_notes))[:2]
+        )
+        quick_memo_html = f'<ul class="quick-memo-list">{recent_items}</ul>'
+    else:
+        quick_memo_html = f'<span class="caption">{escape(t("quick_memo_empty", lang))}</span>'
+
+    quick_card_slot.html(
+        '<div class="quick-card">'
+        f'<span class="overline">{escape(t("quick_metrics_overline", lang))}</span>'
+        f"{quick_roi_html}"
+        f"{quick_memo_html}"
+        '<div class="quick-card-links">'
+        f'<a href="#section-roi">{escape(t("quick_open_roi", lang))} →</a>'
+        f'<a href="#section-memo">{escape(t("quick_open_memo", lang))} →</a>'
+        "</div>"
+        "</div>"
+    )
 
     render_floating_dock("viewer", has_selected=True)
 

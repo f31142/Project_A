@@ -338,7 +338,7 @@ def _render_case_card(row, case, preview_meta, *, is_selected, lang, on_open_vie
         )
         with st.container(
             horizontal=True,
-            horizontal_alignment="right",
+            horizontal_alignment="distribute",
             vertical_alignment="center",
             key=f"case_card_actions_{safe_key}",
         ):

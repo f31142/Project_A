@@ -1785,6 +1785,192 @@ html {
   font-weight: 600;
 }
 
+.tile-pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--stage-ink);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+/* ---------- 02 영상처리 비교 컨트롤 마감 (5단계) ---------- */
+
+.st-key-card_processing [data-testid="stRadio"] div[role="radiogroup"] {
+  gap: 6px;
+}
+
+.st-key-card_processing [data-testid="stRadio"] label[data-baseweb="radio"] {
+  padding: 6px 8px;
+  border-radius: 8px;
+  transition: background-color 120ms ease;
+}
+
+.st-key-card_processing [data-testid="stRadio"] label[data-baseweb="radio"]:hover {
+  background: var(--surface-2);
+}
+
+/* ---------- 04 측정 요약 아키텍처 그리드 (5단계) ---------- */
+
+.summary-strip {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #FAFAFA;
+  overflow: hidden;
+}
+
+.summary-meta {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+  background: var(--surface);
+}
+
+.summary-kpi-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.45fr;
+  background: var(--surface);
+}
+
+.summary-kpi-cell {
+  padding: 13px 15px;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.summary-kpi-cell:last-child {
+  border-right: none;
+}
+
+.summary-kpi-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.summary-kpi-val {
+  font-family: var(--mono);
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-kpi-val .is-muted {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+.summary-kpi-unit {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-3);
+  margin-left: 3px;
+}
+
+.summary-kpi-sep {
+  color: var(--line-strong);
+  font-weight: 400;
+}
+
+.summary-kpi-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.summary-saved-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.summary-saved-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #FFFFFF;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* ---------- 05 검토 메모 카운트 배지 & 반응형 보완 (5단계) ---------- */
+
+.memo-count-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.thumb-chip {
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-title .case-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 1080px) {
+  [data-testid="stButtonGroup"] [data-baseweb="button-group"] {
+    padding: 2px;
+    gap: 1px;
+  }
+  [data-testid="stBaseButton-segmented_control"],
+  [data-testid="stBaseButton-segmented_controlActive"] {
+    padding: 0 9px !important;
+    font-size: 11.5px !important;
+  }
+}
+
+@media (max-width: 780px) {
+  .summary-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+  .summary-kpi-cell {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .summary-kpi-cell:last-child {
+    border-bottom: none;
+  }
+}
+
 .tile-empty {
   aspect-ratio: 1 / 1;
   border: 1px dashed var(--stage-line);
