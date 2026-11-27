@@ -679,6 +679,186 @@ html {
   font-weight: 500;
 }
 
+/* ---------- 메인 화면 인라인 통계 & CT 케이스 카드 그리드 (3단계) ---------- */
+
+.cases-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cases-inline-stats {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  white-space: nowrap;
+}
+
+.cases-inline-stats strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+[class*="st-key-case_card_"] {
+  background: var(--surface);
+  border: 1px solid var(--line) !important;
+  border-radius: 12px !important;
+  padding: 0 !important;
+  gap: 0 !important;
+  overflow: hidden;
+  box-shadow: var(--shadow-xs);
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+[class*="st-key-case_card_"]:hover {
+  border-color: #A1A1AA !important;
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+[class*="st-key-case_card_sel_"],
+[class*="st-key-case_card_sel_"]:hover {
+  border: 1.5px solid var(--ink) !important;
+  box-shadow: 0 6px 18px rgba(9, 9, 11, 0.09) !important;
+}
+
+.case-card-media {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background: #080809;
+  overflow: hidden;
+}
+
+.case-card-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.case-card-tag {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: #FAFAFA;
+  background: rgba(9, 9, 11, 0.76);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  padding: 2px 8px;
+  line-height: 16px;
+}
+
+.case-card-placeholder {
+  width: 100%;
+  height: 100%;
+  background: #1C1C1F;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #71717A;
+  font-size: 12px;
+}
+
+.placeholder-ring {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(255, 255, 255, 0.18);
+}
+
+.placeholder-ring::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 999px;
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+}
+
+.case-card-body {
+  padding: 13px 15px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.case-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.case-card-id {
+  font-family: var(--mono);
+  font-size: 14.5px;
+  line-height: 20px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-card-sub {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 15px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.case-card-footer span {
+  color: var(--ink-3);
+}
+
+.case-card-footer strong {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+[class*="st-key-case_card_actions_"] {
+  padding: 0 12px 11px !important;
+  gap: 6px !important;
+}
+
+[class*="st-key-case_card_actions_"] button {
+  min-height: 28px !important;
+  padding: 0 11px !important;
+  font-size: 12px !important;
+}
+
 /* ---------- 케이스 상세 요약 카드 ---------- */
 
 .case-id {
@@ -783,7 +963,135 @@ html {
   font-weight: 600;
 }
 
-/* ---------- 측정 KPI 카드 (컴팩트 & 좌측 3px 블랙 포인트 바) ---------- */
+/* ---------- 측정 KPI 카드 (컴팩트 2단 통합 카드 · 4단계) ---------- */
+
+.metric-duo {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow-xs);
+}
+
+.metric-duo-top {
+  padding: 14px 16px 12px;
+  border-left: 3px solid var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.metric-duo-bottom {
+  padding: 11px 16px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.metric-duo-bottom-value {
+  font-family: var(--mono);
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-duo-bottom-value.is-empty {
+  color: var(--ink-3);
+}
+
+.metric-duo-sub {
+  padding: 0 16px 10px;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--ink-3);
+}
+
+.quick-card {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  box-shadow: var(--shadow-xs);
+}
+
+.quick-roi-line {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.quick-roi-line.is-empty {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+.quick-memo-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quick-memo-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--ink-2);
+}
+
+.quick-memo-tag {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink);
+  flex: none;
+}
+
+.quick-memo-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-card-links {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.quick-card-links a {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2) !important;
+  text-decoration: none !important;
+  transition: color 120ms ease;
+}
+
+.quick-card-links a:hover {
+  color: var(--ink) !important;
+}
 
 .metric {
   border: 1px solid var(--line);
@@ -1268,6 +1576,114 @@ html {
 .section-desc {
   font-size: 12.5px;
   color: var(--ink-3);
+}
+
+.roi-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+  margin-bottom: 2px;
+}
+
+.roi-kpi-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0 12px;
+  border-right: 1px solid var(--line);
+  min-width: 0;
+}
+
+.roi-kpi-cell:first-child {
+  padding-left: 0;
+}
+
+.roi-kpi-cell:last-child {
+  padding-right: 0;
+  border-right: none;
+}
+
+.roi-kpi-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.roi-kpi-val {
+  font-family: var(--mono);
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.roi-kpi-unit {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-3);
+  margin-left: 3px;
+}
+
+.roi-hud-wrap {
+  display: flex;
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.roi-hud-pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--stage-ink);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 3px 12px;
+  white-space: nowrap;
+}
+
+.st-key-tile_roi {
+  overflow: hidden !important;
+}
+
+.st-key-tile_roi [data-testid="stVegaLiteChart"],
+.st-key-tile_roi .vega-embed {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+.st-key-tile_roi canvas {
+  max-width: 100% !important;
+  height: auto !important;
+  display: block;
+  margin: 0 auto;
+}
+
+@media (max-width: 768px) {
+  .roi-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 10px;
+  }
+  .roi-kpi-cell:nth-child(2) {
+    border-right: none;
+  }
+  .roi-kpi-cell:nth-child(3) {
+    padding-left: 0;
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+  }
 }
 
 .roi-result-metrics {

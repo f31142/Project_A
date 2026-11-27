@@ -112,6 +112,7 @@ PERSISTENT_KEY_PREFIXES = (
     "ui_lang",
     "case_query",
     "status_filter",
+    "case_view_mode",
     "slice_",
     "contour_",
     "compare_processing_",
@@ -166,10 +167,46 @@ for state_key in list(st.session_state.keys()):
         st.session_state[state_key] = st.session_state[state_key]
 
 
-def select_roi_by_drag(source, key):
+def draw_roi_overlay(source: Image.Image, bounds: tuple[int, int, int, int]) -> Image.Image:
+    """Draw a sleek Swiss monochrome ROI overlay with subtle tint & crisp white corner brackets."""
+    x0, x1, y0, y1 = bounds
+    base = source.convert("RGBA")
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    rx0, rx1 = x0, max(x0, x1 - 1)
+    ry0, ry1 = y0, max(y0, y1 - 1)
+
+    # Subtle pure-white translucent interior fill + hairline frame
+    draw.rectangle((rx0, ry0, rx1, ry1), fill=(255, 255, 255, 28), outline=(255, 255, 255, 190), width=1)
+
+    # Architectural pure-white corner brackets
+    box_w = max(1, rx1 - rx0)
+    box_h = max(1, ry1 - ry0)
+    arm = max(6, min(18, box_w // 4, box_h // 4))
+    stroke = 3
+    white = (255, 255, 255, 255)
+    # Top-left
+    draw.line([(rx0, ry0), (rx0 + arm, ry0)], fill=white, width=stroke)
+    draw.line([(rx0, ry0), (rx0, ry0 + arm)], fill=white, width=stroke)
+    # Top-right
+    draw.line([(rx1 - arm, ry0), (rx1, ry0)], fill=white, width=stroke)
+    draw.line([(rx1, ry0), (rx1, ry0 + arm)], fill=white, width=stroke)
+    # Bottom-left
+    draw.line([(rx0, ry1), (rx0 + arm, ry1)], fill=white, width=stroke)
+    draw.line([(rx0, ry1 - arm), (rx0, ry1)], fill=white, width=stroke)
+    # Bottom-right
+    draw.line([(rx1 - arm, ry1), (rx1, ry1)], fill=white, width=stroke)
+    draw.line([(rx1, ry1 - arm), (rx1, ry1)], fill=white, width=stroke)
+
+    return Image.alpha_composite(base, overlay).convert("RGB")
+
+
+def select_roi_by_drag(source, key, *, saved_bounds=None):
     width, height = source.size
-    preview = source.copy()
-    preview.thumbnail((360, 360))
+    canvas_source = draw_roi_overlay(source, saved_bounds) if saved_bounds is not None else source
+    preview = canvas_source.copy()
+    preview.thumbnail((280, 280))
     buffer = BytesIO()
     preview.save(buffer, format="PNG")
     image_url = "data:image/png;base64," + b64encode(buffer.getvalue()).decode("ascii")
@@ -222,6 +259,14 @@ def select_roi_by_drag(source, key):
         return None
 
     return box["x"][0], box["x"][1], box["y"][0], box["y"][1]
+
+
+def reset_slice_roi(roi_key):
+    st.session_state.setdefault("roi_by_slice", {}).pop(roi_key, None)
+    st.session_state.pop(f"roi_x_{roi_key}", None)
+    st.session_state.pop(f"roi_y_{roi_key}", None)
+    rev_key = f"roi_drag_rev_{roi_key}"
+    st.session_state[rev_key] = st.session_state.get(rev_key, 0) + 1
 
 
 initial_cases = {
@@ -507,19 +552,145 @@ def chart_axis_style(chart):
     )
 
 
+@st.cache_data(show_spinner=False, max_entries=32)
+def _cached_dicom_summary(case_id, image_ref, seg_ref, series_uid):
+    case_stub = {"case_id": case_id}
+    if image_ref is not None:
+        case_stub["image_ref"] = image_ref
+    if seg_ref:
+        case_stub["seg_ref"] = seg_ref
+    if series_uid:
+        case_stub["series_uid"] = series_uid
+    ct_slices, ct_error = load_case_ct(case_id, case_stub)
+    preview_bytes = None
+    preview_number = None
+    volume_ml = None
+    max_area_cm2 = None
+    if ct_slices:
+        preview_number = (len(ct_slices) + 1) // 2
+        try:
+            preview_bytes = render_ct_png(ct_slices[preview_number - 1].path)
+        except DicomReadError as exc:
+            ct_error = str(exc)
+        _, tumor_masks, _ = load_case_seg(case_id, case_stub, ct_slices)
+        measurement = measure_tumor(build_analysis_slices(ct_slices, tumor_masks))
+        if measurement is not None:
+            volume_ml = measurement.volume_ml
+            if measurement.areas_mm2:
+                max_area_cm2 = max(measurement.areas_mm2.values()) / 100.0
+    return {
+        "slice_count": len(ct_slices),
+        "has_slices": bool(ct_slices),
+        "preview_number": preview_number,
+        "preview_bytes": preview_bytes,
+        "volume_ml": volume_ml,
+        "max_area_cm2": max_area_cm2,
+        "ct_error": ct_error,
+    }
+
+
+def build_case_preview_info(case_id, case, lang):
+    registered_ct = has_case_ct_reference(case)
+    is_synthetic = bool(case.get("synthetic"))
+    cached = _cached_dicom_summary(
+        case_id,
+        case.get("image_ref"),
+        case.get("seg_ref"),
+        case.get("series_uid"),
+    )
+    if cached["has_slices"] or registered_ct:
+        slice_count = cached["slice_count"] if cached["has_slices"] else case.get("slice_count")
+        preview_bytes = cached["preview_bytes"]
+        preview_number = cached["preview_number"]
+        volume_ml = cached["volume_ml"]
+        max_area_cm2 = cached["max_area_cm2"]
+        ct_error = cached["ct_error"]
+        tag = t("card_tag_ai", lang) if is_synthetic else t("card_tag_dicom", lang)
+        source_short = t("card_subtitle_synthetic", lang) if is_synthetic else t("card_subtitle_dicom", lang)
+        image_label = t("dicom_image_label", lang)
+        image_text = (
+            t("slice_count_text", lang, count=cached["slice_count"])
+            if cached["has_slices"]
+            else t("cannot_open", lang)
+        )
+        volume_label = t("tumor_volume_label", lang)
+    else:
+        slices = case_slice_numbers(case_id)
+        slice_count = case.get("slice_count")
+        preview_number = 41 if 41 in slices else (slices[0] if slices else None)
+        preview_bytes = load_slice_bytes(case_id, preview_number) if preview_number else None
+        measurement = mock_measurements.get(case_id)
+        volume_ml = measurement.volume_ml if measurement is not None else None
+        max_area_cm2 = (
+            max(measurement.areas_mm2.values()) / 100.0
+            if measurement is not None and measurement.areas_mm2
+            else None
+        )
+        ct_error = None
+        tag = t("card_tag_mock", lang) if preview_bytes is not None else t("card_tag_dicom", lang)
+        source_short = t("card_subtitle_mock", lang) if slices else t("card_subtitle_dicom", lang)
+        image_label = t("mock_image_label", lang)
+        image_text = (
+            t("mock_slices_text", lang, slices=" · ".join(map(str, slices)))
+            if slices
+            else t("none", lang)
+        )
+        volume_label = t("mock_volume_label", lang)
+
+    exam_short = label_exam(str(case.get("exam") or "CT 검사"), lang).split(" · ")[0]
+    slice_part = t("slice_count_text", lang, count=slice_count) if slice_count else "—"
+    return {
+        "registered_ct": registered_ct,
+        "slice_count": slice_count,
+        "preview_number": preview_number,
+        "preview_bytes": preview_bytes,
+        "preview_url": image_data_url(preview_bytes, max_side=360) if preview_bytes is not None else None,
+        "tag": tag,
+        "subtitle": f"{exam_short} · {source_short} · {slice_part}",
+        "image_label": image_label,
+        "image_text": image_text,
+        "volume_label": volume_label,
+        "volume_ml": volume_ml,
+        "volume_text": f"{volume_ml:.1f} mL" if volume_ml is not None else "—",
+        "max_area_cm2": max_area_cm2,
+        "ct_error": ct_error,
+    }
+
+
 def render_case_list():
     lang = current_lang()
     render_app_bar(has_selected=bool(cases))
     case_ui.render_storage_notice(lang=lang)
 
+    def _status_of(case):
+        return case_ui.displayed_status(case, review_statuses, REVIEW_STATUSES)
+
+    counts = case_ui.count_by_status(cases, REVIEW_STATUSES, _status_of)
+    stats_bits = [f"<strong>{escape(t('cases_total_inline', lang, count=len(cases)))}</strong>"]
+    for status_name in REVIEW_STATUSES:
+        stats_bits.append(
+            f"<span><strong>{counts[status_name]}</strong> {escape(label_status(status_name, lang))}</span>"
+        )
+    inline_stats = '<span class="cases-inline-stats">' + " · ".join(stats_bits) + "</span>"
+
     title_col, action_col = st.columns([3, 1], vertical_alignment="bottom")
     title_col.html(
+        '<div class="cases-header-row">'
+        "<div>"
         f'<h1 class="page-title">{escape(t("case_list_title", lang))}</h1>'
         f'<p class="page-desc">{escape(t("case_list_desc", lang))}</p>'
+        "</div>"
+        f"{inline_stats}"
+        "</div>"
     )
     with action_col.container(horizontal=True, horizontal_alignment="right"):
         with st.popover(t("register_case", lang), icon=":material/add:"):
             case_ui.render_register_form(cases, lang=lang)
+
+    card_previews = {
+        cid: build_case_preview_info(cid, case_obj, lang)
+        for cid, case_obj in cases.items()
+    }
 
     list_col, detail_col = st.columns([2.35, 1], gap="large")
     selected_case = None
@@ -531,6 +702,8 @@ def render_case_list():
             REVIEW_STATUSES,
             {status: mark for status, (_, mark) in STATUS_STYLES.items()},
             lang=lang,
+            card_previews=card_previews,
+            on_open_viewer=open_viewer,
         )
 
     with detail_col.container(border=True, key="card_detail", gap="medium"):
@@ -546,39 +719,12 @@ def render_case_list():
         selected_id = selected_case["케이스 ID"]
         case = cases[selected_id]
         display_name = escape(label_case_name(case, lang))
-        ct_slices, ct_error = load_case_ct(selected_id, case)
-        registered_ct = has_case_ct_reference(case)
-        slice_count = len(ct_slices) if ct_slices else selected_case["단면 수"]
-        if ct_slices or registered_ct:
-            image_label = t("dicom_image_label", lang)
-            image_text = (
-                t("slice_count_text", lang, count=len(ct_slices))
-                if ct_slices
-                else t("cannot_open", lang)
-            )
-            volume_label = t("tumor_volume_label", lang)
-            preview_bytes = None
-            measurement = None
-            if ct_slices:
-                preview_number = (len(ct_slices) + 1) // 2
-                try:
-                    preview_bytes = render_ct_png(ct_slices[preview_number - 1].path)
-                except DicomReadError as exc:
-                    ct_error = str(exc)
-                _, tumor_masks, _ = load_case_seg(selected_id, case, ct_slices)
-                measurement = measure_tumor(build_analysis_slices(ct_slices, tumor_masks))
-        else:
-            slices = case_slice_numbers(selected_id)
-            preview_number = 41 if 41 in slices else (slices[0] if slices else None)
-            preview_bytes = load_slice_bytes(selected_id, preview_number) if preview_number else None
-            image_label = t("mock_image_label", lang)
-            image_text = (
-                t("mock_slices_text", lang, slices=" · ".join(map(str, slices)))
-                if slices
-                else t("none", lang)
-            )
-            volume_label = t("mock_volume_label", lang)
-            measurement = mock_measurements.get(selected_id)
+        info = card_previews[selected_id]
+        slice_count = info["slice_count"]
+        preview_bytes = info["preview_bytes"]
+        preview_number = info["preview_number"]
+        registered_ct = info["registered_ct"]
+        ct_error = info["ct_error"]
 
         if preview_bytes is not None:
             alt_text = escape(t("thumb_alt", lang, name=label_case_name(case, lang), number=preview_number))
@@ -594,9 +740,15 @@ def render_case_list():
             thumbnail = f'<div class="thumb-empty">{escape(missing)}</div>'
 
         count_text = t("slice_count_text", lang, count=slice_count) if slice_count is not None else "—"
-        volume_ml = measurement.volume_ml if measurement is not None else None
-        volume_text = f"{volume_ml:.1f} mL" if volume_ml is not None else "—"
+        volume_ml = info["volume_ml"]
+        volume_text = info["volume_text"]
         volume_class = ' class="is-measure"' if volume_ml is not None else ""
+        max_area_row = ""
+        if info["max_area_cm2"] is not None:
+            max_area_row = (
+                f"<div><dt>{escape(t('max_area_label', lang))}</dt>"
+                f'<dd class="is-measure">{info["max_area_cm2"]:.1f} cm²</dd></div>'
+            )
 
         st.html(
             '<div class="detail-head">'
@@ -610,8 +762,9 @@ def render_case_list():
             f"<div><dt>{escape(t('col_exam_type', lang))}</dt>"
             f"<dd>{escape(label_exam(str(selected_case['검사 종류']), lang))}</dd></div>"
             f"<div><dt>{escape(t('col_slice_count', lang))}</dt><dd>{escape(count_text)}</dd></div>"
-            f"<div><dt>{escape(image_label)}</dt><dd>{escape(image_text)}</dd></div>"
-            f"<div><dt>{escape(volume_label)}</dt><dd{volume_class}>{escape(volume_text)}</dd></div>"
+            f"<div><dt>{escape(info['image_label'])}</dt><dd>{escape(info['image_text'])}</dd></div>"
+            f"{max_area_row}"
+            f"<div><dt>{escape(info['volume_label'])}</dt><dd{volume_class}>{escape(volume_text)}</dd></div>"
             "</dl>"
         )
         if ct_error and registered_ct:
@@ -996,31 +1149,36 @@ def render_viewer(viewer_id):
 
         volume_ml = summary["tumor_volume_ml"]
         if volume_ml is None:
-            case_value = '<span class="metric-value is-small is-empty">—</span>'
+            case_value = '<span class="metric-duo-bottom-value is-empty">—</span>'
         else:
             case_value = (
-                f'<span class="metric-value is-small">{volume_ml:.1f}'
+                f'<span class="metric-duo-bottom-value">{volume_ml:.1f}'
                 '<span class="metric-unit">mL</span></span>'
             )
         volume_caption = t("volume_caption_dicom", lang) if is_dicom else t("volume_caption_mock", lang)
-        volume_error = (
-            f'<span class="metric-caption">{escape(measurement.volume_error)}</span>'
+        volume_error_html = (
+            f'<div class="metric-duo-sub">{escape(measurement.volume_error)}</div>'
             if measurement is not None and measurement.volume_error
             else ""
         )
         st.html(
-            '<div class="metric is-slice">'
+            '<div class="metric-duo">'
+            '<div class="metric-duo-top">'
             f'<span class="overline"><span class="dot"></span>'
             f'{escape(t("this_slice_overline", lang, current=slice_number, total=total_slices))}</span>'
             f'{slice_value}<span class="metric-caption">{escape(slice_caption)}</span>'
             "</div>"
-            '<div class="metric" style="margin-top: 10px">'
+            '<div class="metric-duo-bottom">'
             f'<span class="overline">{escape(t("whole_case_overline", lang))}</span>'
-            f'{case_value}<span class="metric-caption">{escape(volume_caption)}</span>{volume_error}'
+            f"{case_value}"
+            "</div>"
+            f'<div class="metric-duo-sub">{escape(volume_caption)}</div>'
+            f"{volume_error_html}"
             "</div>"
         )
 
         with st.container(border=True, key="card_display", gap="small"):
+            st.html(f'<span class="overline">{escape(t("display_controls_overline", lang))}</span>')
             contour_available = bool(tumor_masks) and not seg_error if is_dicom else overlay_path is not None
             with st.container(key="contour_row"):
                 st.toggle(t("contour_toggle", lang), key=contour_key, disabled=not contour_available)
@@ -1043,14 +1201,48 @@ def render_viewer(viewer_id):
                 contour_caption = t("contour_caption_none", lang)
             st.html(f'<span class="caption">{escape(contour_caption)}</span>')
 
+        quick_roi_bounds = roi_by_slice.get(roi_key) if roi_key else None
+        if quick_roi_bounds is not None and original_bytes is not None:
+            with Image.open(BytesIO(original_bytes)) as _img:
+                _gray = np.array(_img.convert("L"))
+            _roi_quick, _ = summarize_roi(
+                _gray,
+                quick_roi_bounds,
+                ct_slice.pixel_spacing_mm if ct_slice else None,
+            )
+            _qx0, _qx1, _qy0, _qy1 = quick_roi_bounds
+            quick_roi_html = (
+                '<div class="quick-roi-line">'
+                f'{escape(t("quick_roi_value", lang, mean=_roi_quick["mean_brightness"], w=_qx1 - _qx0, h=_qy1 - _qy0))}'
+                "</div>"
+            )
+        else:
+            quick_roi_html = (
+                f'<div class="quick-roi-line is-empty">{escape(t("quick_roi_empty", lang))}</div>'
+            )
+
+        if case_notes:
+            recent_items = "".join(
+                "<li>"
+                f'<span class="quick-memo-tag">#{saved_note["slice_number"]}</span>'
+                f'<span class="quick-memo-text">{escape(saved_note["text"])}</span>'
+                "</li>"
+                for saved_note in list(reversed(case_notes))[:2]
+            )
+            quick_memo_html = f'<ul class="quick-memo-list">{recent_items}</ul>'
+        else:
+            quick_memo_html = f'<span class="caption">{escape(t("quick_memo_empty", lang))}</span>'
+
         st.html(
-            f'<nav class="jump" aria-label="{escape(t("jump_overline", lang))}">'
-            f'<span class="overline">{escape(t("jump_overline", lang))}</span>'
-            f'<a href="#section-processing"><span><span class="mono">02</span>{escape(t("sec_02_title", lang))}</span><span>→</span></a>'
-            f'<a href="#section-roi"><span><span class="mono">03</span>{escape(t("sec_03_title", lang))}</span><span>→</span></a>'
-            f'<a href="#section-summary"><span><span class="mono">04</span>{escape(t("sec_04_title", lang))}</span><span>→</span></a>'
-            f'<a href="#section-memo"><span><span class="mono">05</span>{escape(t("sec_05_title", lang))}</span><span>→</span></a>'
-            "</nav>"
+            '<div class="quick-card">'
+            f'<span class="overline">{escape(t("quick_metrics_overline", lang))}</span>'
+            f"{quick_roi_html}"
+            f"{quick_memo_html}"
+            '<div class="quick-card-links">'
+            f'<a href="#section-roi">{escape(t("quick_open_roi", lang))} →</a>'
+            f'<a href="#section-memo">{escape(t("quick_open_memo", lang))} →</a>'
+            "</div>"
+            "</div>"
         )
 
     with st.container(border=True, key="card_processing", gap="medium"):
@@ -1176,14 +1368,28 @@ def render_viewer(viewer_id):
             height, width = gray.shape
             mode_key = f"roi_mode_{viewer_id}"
             st.session_state.setdefault(mode_key, ROI_MODES[0])
-            st.segmented_control(
-                t("roi_mode_label", lang),
-                ROI_MODES,
-                format_func=lambda item: label_roi_mode(item, lang),
-                key=mode_key,
-                on_change=keep_choice,
-                args=(mode_key, ROI_MODES[0]),
-            )
+            active_mode = st.session_state.get(mode_key) or ROI_MODES[0]
+
+            with st.container(horizontal=True, vertical_alignment="center", gap="medium"):
+                st.segmented_control(
+                    t("roi_mode_label", lang),
+                    ROI_MODES,
+                    format_func=lambda item: label_roi_mode(item, lang),
+                    key=mode_key,
+                    on_change=keep_choice,
+                    args=(mode_key, ROI_MODES[0]),
+                    label_visibility="collapsed",
+                )
+                st.button(
+                    t("roi_reset_btn", lang),
+                    key=f"reset_roi_{roi_key}",
+                    icon=":material/restart_alt:",
+                    type="secondary",
+                    on_click=reset_slice_roi,
+                    args=(roi_key,),
+                    disabled=(saved_bounds is None and active_mode == "영상에서 드래그"),
+                )
+
             mode = st.session_state.get(mode_key) or ROI_MODES[0]
             preview_column, stats_column = st.columns([1, 1.25], gap="large")
 
@@ -1200,10 +1406,12 @@ def render_viewer(viewer_id):
 
             roi_preview = preview_column.container(key="tile_roi")
             if mode == "영상에서 드래그":
+                drag_rev = st.session_state.get(f"roi_drag_rev_{roi_key}", 0)
                 with roi_preview:
-                    raw_bounds = select_roi_by_drag(source, roi_key)
-                    st.html(
-                        f'<div class="tile-caption"><span>{escape(t("roi_drag_caption", lang))}</span></div>'
+                    raw_bounds = select_roi_by_drag(
+                        source,
+                        f"{roi_key}_{drag_rev}",
+                        saved_bounds=saved_bounds,
                     )
 
             bounds = normalize_roi_bounds(raw_bounds, width, height)
@@ -1211,6 +1419,21 @@ def render_viewer(viewer_id):
                 bounds = saved_bounds
             elif bounds is not None:
                 roi_by_slice[roi_key] = bounds
+
+            if mode == "영상에서 드래그":
+                with roi_preview:
+                    if bounds is not None:
+                        bx0, bx1, by0, by1 = bounds
+                        st.html(
+                            '<div class="roi-hud-wrap">'
+                            f'<span class="roi-hud-pill">{escape(t("roi_hud_coords", lang, x0=bx0, x1=bx1 - 1, y0=by0, y1=by1 - 1))}</span>'
+                            "</div>"
+                            f'<div class="tile-caption"><span>{escape(t("roi_drag_hint_saved", lang))}</span></div>'
+                        )
+                    else:
+                        st.html(
+                            f'<div class="tile-caption"><span>{escape(t("roi_drag_caption", lang))}</span></div>'
+                        )
 
             if bounds is None and raw_bounds is None:
                 stats_column.html(f'<div class="notice">{escape(t("roi_prompt", lang))}</div>')
@@ -1227,16 +1450,14 @@ def render_viewer(viewer_id):
                 roi_mean = roi["mean_brightness"]
                 pixel_count = roi["pixel_count"]
 
-                if mode == "좌표 슬라이더" or raw_bounds is None:
-                    preview = source.copy()
-                    ImageDraw.Draw(preview).rectangle(
-                        (x0, y0, x1 - 1, y1 - 1),
-                        outline=STAGE_ACTIVE,
-                        width=3,
-                    )
+                if mode == "좌표 슬라이더":
+                    preview = draw_roi_overlay(source, bounds)
                     with roi_preview:
                         st.image(preview, width="stretch")
                         st.html(
+                            '<div class="roi-hud-wrap">'
+                            f'<span class="roi-hud-pill">{escape(t("roi_hud_coords", lang, x0=x0, x1=x1 - 1, y0=y0, y1=y1 - 1))}</span>'
+                            "</div>"
                             '<div class="tile-caption">'
                             f'<span>{escape(t("roi_selected_caption", lang, slice_number=slice_number))}</span>'
                             "</div>"
@@ -1269,16 +1490,33 @@ def render_viewer(viewer_id):
                     .mark_rule(color=INK, strokeDash=[4, 3], strokeWidth=1.5)
                     .encode(x="mean:Q")
                 )
+
+                if roi["area_mm2"] is not None:
+                    third_label = t("roi_kpi_area", lang)
+                    third_val = f'{roi["area_mm2"]:,.0f}<span class="roi-kpi-unit">mm²</span>'
+                else:
+                    third_label = t("roi_kpi_pixels", lang)
+                    third_val = f'{pixel_count:,}<span class="roi-kpi-unit">px</span>'
+
                 with stats_column.container(border=True, key="card_histogram", gap="small"):
                     st.html(
-                        '<div class="roi-result-metrics">'
-                        f'<div>{escape(t("roi_mean_label", lang))} <strong>{roi_mean:.1f}</strong></div>'
-                        f'<div>{escape(t("roi_size_label", lang))} <strong>{x1 - x0} × {y1 - y0} px</strong>'
-                        f'<span>{escape(t("roi_pixel_total", lang, count=pixel_count))}</span></div>'
+                        '<div class="roi-kpi-grid">'
+                        '<div class="roi-kpi-cell">'
+                        f'<span class="roi-kpi-label">{escape(t("roi_kpi_mean", lang))}</span>'
+                        f'<span class="roi-kpi-val">{roi_mean:.1f}<span class="roi-kpi-unit">/255</span></span>'
+                        "</div>"
+                        '<div class="roi-kpi-cell">'
+                        f'<span class="roi-kpi-label">{escape(t("roi_kpi_size", lang))}</span>'
+                        f'<span class="roi-kpi-val">{x1 - x0} × {y1 - y0}<span class="roi-kpi-unit">px</span></span>'
+                        "</div>"
+                        '<div class="roi-kpi-cell">'
+                        f'<span class="roi-kpi-label">{escape(third_label)}</span>'
+                        f'<span class="roi-kpi-val">{third_val}</span>'
+                        "</div>"
                         "</div>"
                         '<div class="roi-chart-heading">'
                         f'<strong>{escape(t("roi_hist_heading", lang))}</strong>'
-                        f'<span class="roi-mean-legend">{escape(t("roi_mean_legend", lang))}</span>'
+                        f'<span class="roi-mean-legend">{escape(t("roi_mean_legend", lang))} {roi_mean:.1f}</span>'
                         "</div>"
                     )
                     st.altair_chart(
@@ -1290,6 +1528,7 @@ def render_viewer(viewer_id):
                         st.caption(
                             t("roi_bounds_caption", lang, x0=x0, x1=x1 - 1, y0=y0, y1=y1 - 1)
                         )
+                        st.caption(t("roi_pixel_total", lang, count=pixel_count))
                         if roi["area_mm2"] is not None:
                             st.caption(t("roi_area_caption", lang, area=roi["area_mm2"]))
 
