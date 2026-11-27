@@ -65,11 +65,47 @@ PROCESSING_METHODS = [
     "2D 연결 성분 분석",
 ]
 ROI_MODES = ["영상에서 드래그", "좌표 슬라이더"]
-LOGO_SVG = (
-    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" '
-    'stroke-width="2.1" stroke-linecap="round" aria-hidden="true">'
-    '<circle cx="12" cy="12" r="7.5"></circle>'
-    '<circle cx="12" cy="12" r="3" stroke-opacity="0.7"></circle></svg>'
+
+FLOATING_DOCK_HTML = (
+    '<nav class="floating-dock" role="navigation" aria-label="빠른 이동 도구 바">'
+    '<button type="button" class="dock-btn" data-dock-action="cases" data-tooltip="케이스 목록" aria-label="케이스 목록">'
+    '<svg viewBox="0 0 24 24" aria-hidden="true">'
+    '<rect x="3.5" y="3.5" width="7" height="7" rx="1.6"></rect>'
+    '<rect x="13.5" y="3.5" width="7" height="7" rx="1.6"></rect>'
+    '<rect x="3.5" y="13.5" width="7" height="7" rx="1.6"></rect>'
+    '<rect x="13.5" y="13.5" width="7" height="7" rx="1.6"></rect>'
+    "</svg></button>"
+    '<button type="button" class="dock-btn" data-dock-action="second" data-tooltip="검색" aria-label="검색">'
+    '<svg class="icon-search" viewBox="0 0 24 24" aria-hidden="true">'
+    '<circle cx="11" cy="11" r="6.5"></circle>'
+    '<path d="M20 20l-4.2-4.2"></path>'
+    "</svg>"
+    '<svg class="icon-sliders" viewBox="0 0 24 24" aria-hidden="true" hidden>'
+    '<path d="M4 7h16M4 17h16"></path>'
+    '<circle cx="9" cy="7" r="2.2" fill="currentColor"></circle>'
+    '<circle cx="15" cy="17" r="2.2" fill="currentColor"></circle>'
+    "</svg></button>"
+    '<button type="button" class="dock-btn" data-dock-action="viewer" data-tooltip="CT 뷰어" aria-label="CT 뷰어">'
+    '<svg viewBox="0 0 24 24" aria-hidden="true">'
+    '<path d="M12 3.5L3.5 8 12 12.5 20.5 8 12 3.5z"></path>'
+    '<path d="M3.5 12.2L12 16.7l8.5-4.5"></path>'
+    '<path d="M3.5 16.4L12 20.9l8.5-4.5"></path>'
+    "</svg></button>"
+    '<button type="button" class="dock-btn" data-dock-action="roi" data-tooltip="ROI 분석" aria-label="ROI 분석">'
+    '<svg viewBox="0 0 24 24" aria-hidden="true">'
+    '<path d="M4 9V6a2 2 0 0 1 2-2h3"></path>'
+    '<path d="M15 4h3a2 2 0 0 1 2 2v3"></path>'
+    '<path d="M20 15v3a2 2 0 0 1-2 2h-3"></path>'
+    '<path d="M9 20H6a2 2 0 0 1-2-2v-3"></path>'
+    '<circle cx="12" cy="12" r="2.6"></circle>'
+    "</svg></button>"
+    '<button type="button" class="dock-btn" data-dock-action="memo" data-tooltip="검토 메모" aria-label="검토 메모">'
+    '<svg viewBox="0 0 24 24" aria-hidden="true">'
+    '<path d="M7 3.5h7.5L19.5 8.5V19a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5z"></path>'
+    '<path d="M14 3.5v5h5"></path>'
+    '<path d="M9 12.5h6M9 16h4"></path>'
+    "</svg></button>"
+    "</nav>"
 )
 
 PERSISTENT_KEY_PREFIXES = (
@@ -116,6 +152,12 @@ ct_viewport_component = st.components.v2.component(
         "</div>"
     ),
     js=(APP_DIR / "assets" / "ct_slice_preview.js").read_text(encoding="utf-8"),
+    isolate_styles=False,
+)
+floating_dock_component = st.components.v2.component(
+    "floating_dock",
+    html=FLOATING_DOCK_HTML,
+    js=(APP_DIR / "assets" / "floating_dock.js").read_text(encoding="utf-8"),
     isolate_styles=False,
 )
 
@@ -248,26 +290,48 @@ def status_badge(status, lang=LANG_KO):
     return f'<span class="badge badge-{style_key}">{escape(label_status(status, lang))}</span>'
 
 
-def render_app_bar(case_name=None):
+def render_app_bar(case_name=None, *, has_selected=True):
     lang = current_lang()
     st.session_state.setdefault("ui_lang", lang)
     st.session_state.setdefault("ui_lang_control", lang_to_choice(lang))
 
     if case_name is None:
         crumbs = f'<span class="is-current">{escape(t("case_list_title", lang))}</span>'
+        viewer_cls = "" if has_selected else " is-disabled"
+        center_nav = (
+            f'<nav class="appbar-nav" aria-label="{escape(t("section_nav_aria", lang))}">'
+            f'<a href="#top" class="is-active" data-nav-action="cases-top">{escape(t("nav_cases_tab", lang))}</a>'
+            f'<a href="#viewer" class="{viewer_cls.strip()}" data-nav-action="open-viewer">{escape(t("nav_viewer_tab", lang))}</a>'
+            "</nav>"
+        )
     else:
         crumbs = (
             f'<span>{escape(t("case_list_title", lang))}</span>'
             '<span aria-hidden="true">/</span>'
             f'<span class="is-current mono">{escape(case_name)}</span>'
         )
+        center_nav = (
+            f'<nav class="appbar-nav" aria-label="{escape(t("section_nav_aria", lang))}">'
+            f'<a href="#section-viewer" class="is-active" data-section="section-viewer">{escape(t("nav_01_viewer", lang))}</a>'
+            f'<a href="#section-processing" data-section="section-processing">{escape(t("nav_02_compare", lang))}</a>'
+            f'<a href="#section-roi" data-section="section-roi">{escape(t("nav_03_roi", lang))}</a>'
+            f'<a href="#section-summary" data-section="section-summary">{escape(t("nav_04_summary", lang))}</a>'
+            f'<a href="#section-memo" data-section="section-memo">{escape(t("nav_05_memo", lang))}</a>'
+            "</nav>"
+        )
+
     st.html(
         '<header class="appbar"><div class="appbar-inner">'
-        f'<span class="appbar-logo">{LOGO_SVG}</span>'
+        '<div class="appbar-brand">'
+        '<span class="appbar-logo" aria-hidden="true"></span>'
         f'<span class="appbar-name">{escape(t("app_title", lang))}</span>'
         '<span class="appbar-divider"></span>'
         f'<nav class="appbar-crumbs" aria-label="{escape(t("nav_aria", lang))}">{crumbs}</nav>'
+        "</div>"
+        f"{center_nav}"
+        '<div class="appbar-right">'
         f'<span class="appbar-badge">{escape(t("app_badge", lang))}</span>'
+        "</div>"
         "</div></header>"
     )
     with st.container(key="lang_switcher"):
@@ -278,6 +342,28 @@ def render_app_bar(case_name=None):
             on_change=_sync_language,
             label_visibility="collapsed",
         )
+
+
+def render_floating_dock(mode: str, *, has_selected: bool = False):
+    lang = current_lang()
+    floating_dock_component(
+        key=f"floating_dock_{mode}_{lang}",
+        data={
+            "mode": mode,
+            "hasSelected": has_selected,
+            "labels": {
+                "dockAria": t("dock_aria", lang),
+                "cases": t("dock_cases", lang),
+                "search": t("dock_search", lang),
+                "compare": t("dock_compare", lang),
+                "viewer": t("dock_viewer", lang),
+                "openViewer": t("dock_open_viewer", lang),
+                "roi": t("dock_roi", lang),
+                "memo": t("dock_memo", lang),
+                "viewerOnly": t("dock_viewer_only", lang),
+            },
+        },
+    )
 
 
 def section_heading(number, title, description, anchor):
@@ -423,7 +509,7 @@ def chart_axis_style(chart):
 
 def render_case_list():
     lang = current_lang()
-    render_app_bar()
+    render_app_bar(has_selected=bool(cases))
     case_ui.render_storage_notice(lang=lang)
 
     title_col, action_col = st.columns([3, 1], vertical_alignment="bottom")
@@ -454,6 +540,7 @@ def render_case_list():
                 f'<span class="overline">{escape(t("selected_case_overline", lang))}</span>'
                 f'<div class="thumb-empty">{escape(t("select_case_prompt", lang))}</div></div>'
             )
+            render_floating_dock("list", has_selected=False)
             return
 
         selected_id = selected_case["케이스 ID"]
@@ -531,12 +618,14 @@ def render_case_list():
             st.warning(ct_error)
         st.button(
             t("open_viewer", lang),
+            key="open_selected_viewer",
             type="primary",
             icon=":material/arrow_forward:",
             width="stretch",
             on_click=open_viewer,
             args=(selected_id,),
         )
+    render_floating_dock("list", has_selected=True)
 
 
 def render_viewer(viewer_id):
@@ -573,6 +662,7 @@ def render_viewer(viewer_id):
 
     display_name = label_case_name(case, lang)
     render_app_bar(display_name)
+    st.html('<div id="section-viewer" class="viewer-anchor" aria-hidden="true"></div>')
 
     with st.container(horizontal=True, vertical_alignment="center", gap="medium"):
         st.button(
@@ -1286,6 +1376,8 @@ def render_viewer(viewer_id):
                     f'<span class="empty-desc">{escape(t("memo_empty_desc", lang))}</span>'
                     "</div>"
                 )
+
+    render_floating_dock("viewer", has_selected=True)
 
 
 viewer_case_id = st.session_state.get("viewer_case_id")

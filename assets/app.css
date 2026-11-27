@@ -26,6 +26,10 @@
 
 /* ---------- 페이지 틀 (100% 데스크톱 여유 스케일) ---------- */
 
+html {
+  scroll-behavior: smooth;
+}
+
 .stApp,
 [data-testid="stAppViewContainer"] {
   background: var(--bg);
@@ -43,19 +47,20 @@
 
 [data-testid="stMainBlockContainer"] {
   max-width: 1240px;
-  padding: 68px 36px 88px;
+  padding: 68px 36px 104px;
 }
 
 @media (max-width: 768px) {
   [data-testid="stMainBlockContainer"] {
-    padding: 64px 16px 72px;
+    padding: 64px 16px 96px;
   }
 }
 
-/* ---------- 상단 슬림 바 (48px) ---------- */
+/* ---------- 상단 슬림 바 (48px) + 중앙 세그먼트 필 내비게이션 ---------- */
 
 [data-testid="stElementContainer"][data-stale="true"]:has(.appbar),
-[data-testid="stElementContainer"][data-stale="true"]:has(.st-key-lang_switcher) {
+[data-testid="stElementContainer"][data-stale="true"]:has(.st-key-lang_switcher),
+[data-testid="stElementContainer"][data-stale="true"]:has(.floating-dock) {
   opacity: 1;
   transition: none;
 }
@@ -79,8 +84,16 @@
   box-sizing: border-box;
   display: flex;
   align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.appbar-brand {
+  display: flex;
+  align-items: center;
   gap: 10px;
   min-width: 0;
+  flex: 1 1 0;
 }
 
 .appbar-logo {
@@ -133,7 +146,7 @@
   gap: 6px;
   min-width: 0;
   overflow: hidden;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--ink-3);
   white-space: nowrap;
 }
@@ -141,12 +154,64 @@
 .appbar-crumbs .is-current {
   color: var(--ink);
   font-weight: 500;
+  max-width: 165px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* 시그니처 상단 세그먼트 필 내비게이션 바 */
+.appbar-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: #FAFAFA;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  flex: none;
+  box-shadow: var(--shadow-xs);
+}
+
+.appbar-nav a {
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-3) !important;
+  text-decoration: none !important;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.appbar-nav a:hover {
+  color: var(--ink) !important;
+  background: var(--surface-2);
+}
+
+.appbar-nav a.is-active,
+.appbar-nav a.is-active:hover {
+  background: var(--ink) !important;
+  color: #FFFFFF !important;
+}
+
+.appbar-nav a.is-disabled {
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.appbar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .appbar-badge {
-  margin-left: auto;
   height: 24px;
   padding: 0 10px;
   border: 1px solid var(--line-strong);
@@ -197,10 +262,138 @@
   line-height: 1 !important;
 }
 
-@media (max-width: 768px) {
-  .appbar-inner { padding: 0 144px 0 16px; }
+@media (max-width: 1120px) {
   .appbar-badge { display: none; }
+}
+
+@media (max-width: 920px) {
+  .appbar-divider,
+  .appbar-crumbs { display: none; }
+}
+
+@media (max-width: 768px) {
+  .appbar-inner { padding: 0 132px 0 16px; }
+  .appbar-nav { display: none; }
   .st-key-lang_switcher { right: 50px; }
+}
+
+/* ---------- 하단 중앙 검정 플로팅 독 바 ---------- */
+
+.viewer-anchor {
+  position: relative;
+  top: -64px;
+  height: 0;
+  width: 0;
+  pointer-events: none;
+}
+
+.floating-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 999990;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  background: #09090B;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  box-shadow:
+    0 14px 34px rgba(9, 9, 11, 0.26),
+    0 3px 10px rgba(9, 9, 11, 0.14);
+}
+
+.dock-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    transform 150ms ease,
+    opacity 150ms ease;
+}
+
+.dock-btn svg {
+  width: 17px;
+  height: 17px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.85;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.dock-btn:hover:not(:disabled):not(.is-active) {
+  background: rgba(255, 255, 255, 0.14);
+  color: #FFFFFF;
+}
+
+.dock-btn.is-active {
+  background: #FFFFFF;
+  color: #09090B;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.dock-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.dock-btn:focus-visible {
+  outline: 2px solid #FFFFFF;
+  outline-offset: 2px;
+}
+
+.dock-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #09090B;
+  color: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: 0 6px 16px rgba(9, 9, 11, 0.22);
+  transition: opacity 130ms ease, transform 130ms ease;
+}
+
+.dock-btn:hover::after,
+.dock-btn:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+@media (max-width: 640px) {
+  .floating-dock {
+    bottom: 12px;
+    padding: 4px 6px;
+    gap: 4px;
+  }
+  .dock-btn {
+    width: 34px;
+    height: 34px;
+  }
 }
 
 /* ---------- 타이포그래피 (컴팩트 & 선명) ---------- */
