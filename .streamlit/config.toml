@@ -1,39 +1,39 @@
-# 간 CT 검토실 테마 — "Quiet Precision"
-# 잉크(#121917)는 조작, 민트·청록은 종양과 측정, 앰버는 검토 중을 뜻합니다.
+# 간 CT 검토실 테마 — "Airy Swiss Monochrome"
+# 순수 흑백(제트블랙 #09090B · 화이트 #FFFFFF · 뉴트럴 그레이) 기반의 미니멀 의료 UI
 
 [client]
 toolbarMode = "minimal"
 
 [theme]
 base = "light"
-primaryColor = "#121917"
+primaryColor = "#09090B"
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F7F8F6"
-textColor = "#121917"
-linkColor = "#0B6E5B"
-borderColor = "#E2E6E1"
-dataframeBorderColor = "#E2E6E1"
+secondaryBackgroundColor = "#F4F4F5"
+textColor = "#09090B"
+linkColor = "#09090B"
+borderColor = "#E4E4E7"
+dataframeBorderColor = "#E4E4E7"
 showWidgetBorder = true
 baseRadius = "10px"
-buttonRadius = "10px"
-baseFontSize = 15
+buttonRadius = "999px"
+baseFontSize = 14
 font = "'IBM Plex Sans KR':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap"
 codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap"
 headingFontWeights = 600
-chartCategoricalColors = ["#10997D", "#121917", "#E5A50A", "#636D69"]
+chartCategoricalColors = ["#09090B", "#52525B", "#A1A1AA", "#D4D4D8"]
 
-greenColor = "#10997D"
-greenTextColor = "#0B6E5B"
-greenBackgroundColor = "#E6F5F0"
-yellowColor = "#E5A50A"
-yellowTextColor = "#8A5A00"
-yellowBackgroundColor = "#FCF3DC"
-orangeColor = "#E5A50A"
-orangeTextColor = "#8A5A00"
-orangeBackgroundColor = "#FCF3DC"
-redColor = "#B42318"
-redTextColor = "#B42318"
-redBackgroundColor = "#FDEDEB"
-blueColor = "#636D69"
-blueTextColor = "#47524E"
-blueBackgroundColor = "#EEF0ED"
+greenColor = "#09090B"
+greenTextColor = "#09090B"
+greenBackgroundColor = "#F4F4F5"
+yellowColor = "#52525B"
+yellowTextColor = "#27272A"
+yellowBackgroundColor = "#F4F4F5"
+orangeColor = "#52525B"
+orangeTextColor = "#27272A"
+orangeBackgroundColor = "#F4F4F5"
+redColor = "#18181B"
+redTextColor = "#18181B"
+redBackgroundColor = "#F4F4F5"
+blueColor = "#52525B"
+blueTextColor = "#3F3F46"
+blueBackgroundColor = "#F4F4F5"

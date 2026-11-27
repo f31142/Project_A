@@ -11,7 +11,6 @@ import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw
 
-from case_list import case_display_name
 from ct_analysis import TumorMeasurement, build_analysis_slices, measure_tumor
 from ct_case import has_case_ct_reference, load_case_ct, load_case_seg
 from dicom_ct import (
@@ -21,21 +20,35 @@ from dicom_ct import (
     render_ct_png,
     render_ct_preview_sheet,
 )
+from i18n import (
+    LANG_CHOICES,
+    LANG_KO,
+    label_case_name,
+    label_exam,
+    label_method,
+    label_roi_mode,
+    label_source,
+    label_status,
+    lang_to_choice,
+    method_caption,
+    normalize_lang,
+    t,
+)
 from roi_analysis import build_measurement_summary, normalize_roi_bounds, summarize_roi
 
 APP_DIR = Path(__file__).resolve().parent
 MOCK_CT_DIR = APP_DIR / "assets" / "mock_ct"
 CT_PREVIEW_TILE_SIZE = 256
 
-INK = "#121917"
-INK_3 = "#636D69"
-LINE = "#E2E6E1"
-LINE_STRONG = "#CDD3CD"
-STAGE = "#0B100F"
-STAGE_AXIS = "#8E9A96"
-MINT = "#5CE7C4"
-TEAL = "#10997D"
-TEAL_DIM = "#2E6B5D"
+INK = "#09090B"
+INK_3 = "#71717A"
+LINE = "#E4E4E7"
+LINE_STRONG = "#D4D4D8"
+STAGE = "#080809"
+STAGE_AXIS = "#A1A1AA"
+STAGE_ACTIVE = "#FFFFFF"
+STAGE_MUTED = "#3F3F46"
+CHART_BAR = "#18181B"
 SANS_FONT = "IBM Plex Sans KR"
 MONO_FONT = "IBM Plex Mono"
 
@@ -52,19 +65,15 @@ PROCESSING_METHODS = [
     "2D 연결 성분 분석",
 ]
 ROI_MODES = ["영상에서 드래그", "좌표 슬라이더"]
-SOURCE_LABELS = {
-    "dicom": "DICOM CT",
-    "synthetic_dicom": "합성 DICOM CT",
-    "mock": "모의 CT",
-    "uploaded_png": "첨부한 PNG",
-}
 LOGO_SVG = (
-    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5CE7C4" '
-    'stroke-width="2" stroke-linecap="round" aria-hidden="true">'
-    '<ellipse cx="12" cy="12" rx="8" ry="6"></ellipse><path d="M7 12h10"></path></svg>'
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" '
+    'stroke-width="2.1" stroke-linecap="round" aria-hidden="true">'
+    '<circle cx="12" cy="12" r="7.5"></circle>'
+    '<circle cx="12" cy="12" r="3" stroke-opacity="0.7"></circle></svg>'
 )
 
 PERSISTENT_KEY_PREFIXES = (
+    "ui_lang",
     "case_query",
     "status_filter",
     "slice_",
@@ -76,7 +85,20 @@ PERSISTENT_KEY_PREFIXES = (
     "roi_mode_",
 )
 
-st.set_page_config(page_title="간 CT 검토실", layout="wide")
+
+def current_lang() -> str:
+    return normalize_lang(st.session_state.get("ui_lang", LANG_KO))
+
+
+def _sync_language():
+    choice = st.session_state.get("ui_lang_control")
+    if choice is None:
+        st.session_state["ui_lang_control"] = lang_to_choice(current_lang())
+        return
+    st.session_state["ui_lang"] = normalize_lang(choice)
+
+
+st.set_page_config(page_title=t("app_title", current_lang()), layout="wide")
 st.html("<style>" + (APP_DIR / "assets" / "app.css").read_text(encoding="utf-8") + "</style>")
 ct_viewport_component = st.components.v2.component(
     "ct_viewport",
@@ -86,11 +108,11 @@ ct_viewport_component = st.components.v2.component(
         '<output aria-label="현재 배율">100%</output>'
         '<button type="button" data-view-action="zoom-in" aria-label="확대">+ 확대</button>'
         '<button type="button" data-view-action="reset">초기화</button>'
-        '</div>'
+        "</div>"
         '<div class="ct-slice-preview" role="region" aria-label="CT 영상" tabindex="0">'
         '<div class="ct-view-content">'
         '<img alt="CT 단면" draggable="false"><canvas hidden aria-hidden="true"></canvas>'
-        '</div>'
+        "</div>"
         "</div>"
     ),
     js=(APP_DIR / "assets" / "ct_slice_preview.js").read_text(encoding="utf-8"),
@@ -115,7 +137,12 @@ def select_roi_by_drag(source, key):
         encodings=["x", "y"],
         translate=False,
         zoom=False,
-        mark=alt.BrushConfig(fill=MINT, fillOpacity=0.16, stroke=MINT, strokeWidth=2),
+        mark=alt.BrushConfig(
+            fill=STAGE_ACTIVE,
+            fillOpacity=0.14,
+            stroke=STAGE_ACTIVE,
+            strokeWidth=2,
+        ),
     )
     chart = (
         alt.Chart(alt.Data(values=[{"x": width / 2, "y": height / 2, "url": image_url}]))
@@ -184,7 +211,6 @@ notes_by_case = st.session_state.setdefault("review_notes", {})
 roi_by_slice = st.session_state.setdefault("roi_by_slice", {})
 
 
-
 def set_review_status(case_id, status):
     st.session_state["review_statuses"][case_id] = status
 
@@ -207,7 +233,6 @@ def keep_choice(key, fallback):
         st.session_state[key] = fallback
 
 
-
 @st.cache_data(show_spinner=False)
 def image_data_url(image_bytes, max_side=480):
     with Image.open(BytesIO(image_bytes)) as image:
@@ -218,58 +243,93 @@ def image_data_url(image_bytes, max_side=480):
     return "data:image/png;base64," + b64encode(buffer.getvalue()).decode("ascii")
 
 
-def status_badge(status):
-    return f'<span class="badge badge-{STATUS_STYLES[status][0]}">{status}</span>'
+def status_badge(status, lang=LANG_KO):
+    style_key = STATUS_STYLES[status][0]
+    return f'<span class="badge badge-{style_key}">{escape(label_status(status, lang))}</span>'
 
 
 def render_app_bar(case_name=None):
+    lang = current_lang()
+    st.session_state.setdefault("ui_lang", lang)
+    st.session_state.setdefault("ui_lang_control", lang_to_choice(lang))
+
     if case_name is None:
-        crumbs = '<span class="is-current">케이스 목록</span>'
+        crumbs = f'<span class="is-current">{escape(t("case_list_title", lang))}</span>'
     else:
         crumbs = (
-            '<span>케이스 목록</span><span aria-hidden="true">›</span>'
+            f'<span>{escape(t("case_list_title", lang))}</span>'
+            '<span aria-hidden="true">/</span>'
             f'<span class="is-current mono">{escape(case_name)}</span>'
         )
     st.html(
         '<header class="appbar"><div class="appbar-inner">'
         f'<span class="appbar-logo">{LOGO_SVG}</span>'
-        '<span class="appbar-name">간 CT 검토실</span>'
+        f'<span class="appbar-name">{escape(t("app_title", lang))}</span>'
         '<span class="appbar-divider"></span>'
-        f'<nav class="appbar-crumbs" aria-label="현재 위치">{crumbs}</nav>'
-        '<span class="appbar-badge">교육용 · 검토 기록은 세션 동안 유지</span>'
+        f'<nav class="appbar-crumbs" aria-label="{escape(t("nav_aria", lang))}">{crumbs}</nav>'
+        f'<span class="appbar-badge">{escape(t("app_badge", lang))}</span>'
         "</div></header>"
     )
+    with st.container(key="lang_switcher"):
+        st.segmented_control(
+            t("lang_aria", lang),
+            list(LANG_CHOICES),
+            key="ui_lang_control",
+            on_change=_sync_language,
+            label_visibility="collapsed",
+        )
 
 
 def section_heading(number, title, description, anchor):
+    desc_html = f'<span class="section-desc">{escape(description)}</span>' if description else ""
     return (
         f'<div class="section-head" id="{anchor}">'
         f'<span class="section-num">{number}</span>'
-        f'<h2 class="section-title">{title}</h2>'
-        f'<span class="section-desc">{description}</span>'
+        f'<h2 class="section-title">{escape(title)}</h2>'
+        f"{desc_html}"
         "</div>"
     )
 
 
-def render_measurement_values(summary):
-    name = case_display_name(cases[summary["case_id"]])
-    st.caption(f"{name} · {summary['slice_number']}번 단면 · {SOURCE_LABELS[summary['source']]}")
+def render_measurement_values(summary, lang=LANG_KO):
+    name = label_case_name(cases[summary["case_id"]], lang)
+    st.caption(
+        t(
+            "summary_caption_line",
+            lang,
+            name=name,
+            slice_number=summary["slice_number"],
+            source=label_source(summary["source"], lang),
+        )
+    )
     area = summary["tumor_area_cm2"]
     volume = summary["tumor_volume_ml"]
     area_col, volume_col = st.columns(2)
-    area_col.metric("현재 단면의 종양 면적", f"{area:.1f} cm²" if area is not None else "측정값 없음")
-    volume_col.metric("케이스 전체 종양 부피", f"{volume:.1f} mL" if volume is not None else "측정값 없음")
+    area_col.metric(
+        t("summary_metric_area", lang),
+        f"{area:.1f} cm²" if area is not None else t("no_measurement", lang),
+    )
+    volume_col.metric(
+        t("summary_metric_volume", lang),
+        f"{volume:.1f} mL" if volume is not None else t("no_measurement", lang),
+    )
     roi = summary["roi"]
     if roi is None:
-        st.caption("선택한 ROI 없음")
+        st.caption(t("summary_no_roi", lang))
         return
     bounds = roi["bounds"]
-    text = (
-        f"사각형 ROI · x {bounds['x0']}–{bounds['x1'] - 1}, y {bounds['y0']}–{bounds['y1'] - 1}"
-        f" · {roi['pixel_count']:,}픽셀 · 평균 밝기 {roi['mean_brightness']:.1f} / 255"
+    text = t(
+        "summary_roi_line",
+        lang,
+        x0=bounds["x0"],
+        x1=bounds["x1"] - 1,
+        y0=bounds["y0"],
+        y1=bounds["y1"] - 1,
+        pixels=roi["pixel_count"],
+        mean=roi["mean_brightness"],
     )
     if roi["area_mm2"] is not None:
-        text += f" · ROI 면적 {roi['area_mm2']:,.2f} mm²"
+        text += t("summary_roi_area_suffix", lang, area=roi["area_mm2"])
     st.caption(text)
 
 
@@ -297,7 +357,15 @@ def ct_preview_sheet(files: tuple[tuple[Path, int], ...], seg_source=None, _mask
 
 
 def render_ct_viewport(
-    image_source, viewer_id, slice_number, slice_count, dicom_slices, *, seg_source=None, masks=None
+    image_source,
+    viewer_id,
+    slice_number,
+    slice_count,
+    dicom_slices,
+    *,
+    lang=LANG_KO,
+    seg_source=None,
+    masks=None,
 ):
     # Streamlit serves these images at stable media URLs across reruns.
     with st.container(key=f"ct_full_slice_{slice_number}"):
@@ -313,11 +381,23 @@ def render_ct_viewport(
                 st.image(sheet, width=CT_PREVIEW_TILE_SIZE * CT_PREVIEW_COLUMNS, output_format="JPEG")
 
     ct_viewport_component(
-        key=f"ct_viewport_{viewer_id}",
+        key=f"ct_viewport_{viewer_id}_{lang}",
         data={
             "caseId": viewer_id,
             "tileSize": CT_PREVIEW_TILE_SIZE,
             "sliceCount": slice_count,
+            "slicePrefix": t("slice_prefix", lang),
+            "labels": {
+                "zoomOut": t("zoom_out", lang),
+                "zoomIn": t("zoom_in", lang),
+                "reset": t("zoom_reset", lang),
+                "zoomOutAria": t("zoom_out_aria", lang),
+                "zoomInAria": t("zoom_in_aria", lang),
+                "controlsAria": t("zoom_controls_aria", lang),
+                "readoutAria": t("zoom_readout_aria", lang),
+                "imageAria": t("ct_image_aria", lang),
+                "imageAlt": t("ct_image_alt", lang),
+            },
         },
     )
 
@@ -327,10 +407,10 @@ def chart_axis_style(chart):
         chart.configure(background="#FFFFFF")
         .configure_axis(
             labelFont=MONO_FONT,
-            labelFontSize=11,
+            labelFontSize=10.5,
             labelColor=INK_3,
             titleFont=SANS_FONT,
-            titleFontSize=12,
+            titleFontSize=11,
             titleFontWeight=500,
             titleColor=INK_3,
             gridColor=LINE,
@@ -341,21 +421,21 @@ def chart_axis_style(chart):
     )
 
 
-
 def render_case_list():
+    lang = current_lang()
     render_app_bar()
-    case_ui.render_storage_notice()
+    case_ui.render_storage_notice(lang=lang)
 
     title_col, action_col = st.columns([3, 1], vertical_alignment="bottom")
     title_col.html(
-        '<h1 class="page-title">케이스 목록</h1>'
-        '<p class="page-desc">검토할 케이스를 고르면 오른쪽에 요약이 나오고, 뷰어에서 단면을 엽니다.</p>'
+        f'<h1 class="page-title">{escape(t("case_list_title", lang))}</h1>'
+        f'<p class="page-desc">{escape(t("case_list_desc", lang))}</p>'
     )
     with action_col.container(horizontal=True, horizontal_alignment="right"):
-        with st.popover("케이스 등록", icon=":material/add:"):
-            case_ui.render_register_form(cases)
+        with st.popover(t("register_case", lang), icon=":material/add:"):
+            case_ui.render_register_form(cases, lang=lang)
 
-    list_col, detail_col = st.columns([2.3, 1], gap="large")
+    list_col, detail_col = st.columns([2.35, 1], gap="large")
     selected_case = None
 
     with list_col:
@@ -364,26 +444,32 @@ def render_case_list():
             review_statuses,
             REVIEW_STATUSES,
             {status: mark for status, (_, mark) in STATUS_STYLES.items()},
+            lang=lang,
         )
 
     with detail_col.container(border=True, key="card_detail", gap="medium"):
         if selected_case is None:
             st.html(
-                '<div class="detail-head"><span class="overline">선택한 케이스</span>'
-                '<div class="thumb-empty">표에서 케이스를 고르면 요약이 나와요</div></div>'
+                '<div class="detail-head">'
+                f'<span class="overline">{escape(t("selected_case_overline", lang))}</span>'
+                f'<div class="thumb-empty">{escape(t("select_case_prompt", lang))}</div></div>'
             )
             return
 
         selected_id = selected_case["케이스 ID"]
         case = cases[selected_id]
-        display_name = escape(case_display_name(case))
+        display_name = escape(label_case_name(case, lang))
         ct_slices, ct_error = load_case_ct(selected_id, case)
         registered_ct = has_case_ct_reference(case)
         slice_count = len(ct_slices) if ct_slices else selected_case["단면 수"]
         if ct_slices or registered_ct:
-            image_label = "DICOM 영상"
-            image_text = f"{len(ct_slices)}장" if ct_slices else "열 수 없음"
-            volume_label = "종양 부피"
+            image_label = t("dicom_image_label", lang)
+            image_text = (
+                t("slice_count_text", lang, count=len(ct_slices))
+                if ct_slices
+                else t("cannot_open", lang)
+            )
+            volume_label = t("tumor_volume_label", lang)
             preview_bytes = None
             measurement = None
             if ct_slices:
@@ -398,47 +484,53 @@ def render_case_list():
             slices = case_slice_numbers(selected_id)
             preview_number = 41 if 41 in slices else (slices[0] if slices else None)
             preview_bytes = load_slice_bytes(selected_id, preview_number) if preview_number else None
-            image_label = "모의 영상"
-            image_text = " · ".join(map(str, slices)) + "번" if slices else "없음"
-            volume_label = "모의 부피"
+            image_label = t("mock_image_label", lang)
+            image_text = (
+                t("mock_slices_text", lang, slices=" · ".join(map(str, slices)))
+                if slices
+                else t("none", lang)
+            )
+            volume_label = t("mock_volume_label", lang)
             measurement = mock_measurements.get(selected_id)
 
         if preview_bytes is not None:
+            alt_text = escape(t("thumb_alt", lang, name=label_case_name(case, lang), number=preview_number))
+            chip_text = escape(t("key_slice_chip", lang, current=preview_number, total=slice_count))
             thumbnail = (
                 '<div class="thumb">'
-                f'<img src="{image_data_url(preview_bytes)}" '
-                f'alt="{display_name} {preview_number}번 단면 미리보기">'
-                f'<span class="thumb-chip">{preview_number} / {slice_count} · 대표 단면</span>'
+                f'<img src="{image_data_url(preview_bytes)}" alt="{alt_text}">'
+                f'<span class="thumb-chip">{chip_text}</span>'
                 "</div>"
             )
         else:
-            missing = "DICOM 미리보기 없음" if registered_ct else "첨부된 영상 없음"
-            thumbnail = f'<div class="thumb-empty">{missing}</div>'
+            missing = t("no_dicom_preview", lang) if registered_ct else t("no_attached_image", lang)
+            thumbnail = f'<div class="thumb-empty">{escape(missing)}</div>'
 
-        count_text = f"{slice_count}장" if slice_count is not None else "—"
+        count_text = t("slice_count_text", lang, count=slice_count) if slice_count is not None else "—"
         volume_ml = measurement.volume_ml if measurement is not None else None
         volume_text = f"{volume_ml:.1f} mL" if volume_ml is not None else "—"
         volume_class = ' class="is-measure"' if volume_ml is not None else ""
 
         st.html(
             '<div class="detail-head">'
-            '<span class="overline">선택한 케이스</span>'
+            f'<span class="overline">{escape(t("selected_case_overline", lang))}</span>'
             '<div class="detail-title">'
             f'<span class="case-id">{display_name}</span>'
-            f"{status_badge(selected_case['검토 상태'])}"
+            f"{status_badge(selected_case['검토 상태'], lang)}"
             "</div></div>"
             f"{thumbnail}"
             '<dl class="facts">'
-            f"<div><dt>검사 종류</dt><dd>{escape(str(selected_case['검사 종류']))}</dd></div>"
-            f"<div><dt>단면 수</dt><dd>{count_text}</dd></div>"
-            f"<div><dt>{image_label}</dt><dd>{image_text}</dd></div>"
-            f"<div><dt>{volume_label}</dt><dd{volume_class}>{volume_text}</dd></div>"
+            f"<div><dt>{escape(t('col_exam_type', lang))}</dt>"
+            f"<dd>{escape(label_exam(str(selected_case['검사 종류']), lang))}</dd></div>"
+            f"<div><dt>{escape(t('col_slice_count', lang))}</dt><dd>{escape(count_text)}</dd></div>"
+            f"<div><dt>{escape(image_label)}</dt><dd>{escape(image_text)}</dd></div>"
+            f"<div><dt>{escape(volume_label)}</dt><dd{volume_class}>{escape(volume_text)}</dd></div>"
             "</dl>"
         )
         if ct_error and registered_ct:
             st.warning(ct_error)
         st.button(
-            "뷰어 열기",
+            t("open_viewer", lang),
             type="primary",
             icon=":material/arrow_forward:",
             width="stretch",
@@ -447,8 +539,8 @@ def render_case_list():
         )
 
 
-
 def render_viewer(viewer_id):
+    lang = current_lang()
     case = cases[viewer_id]
     registered_ct = has_case_ct_reference(case)
     dicom_slices, dicom_error = load_case_ct(viewer_id, case)
@@ -465,9 +557,10 @@ def render_viewer(viewer_id):
     measurement = mock_measurements.get(viewer_id) if use_mock else measure_tumor(analysis_slices)
     areas_cm2 = (
         {number: area / 100 for number, area in measurement.areas_mm2.items()}
-        if measurement is not None else {}
+        if measurement is not None
+        else {}
     )
-    area_title = "종양 면적" if is_dicom else "모의 종양 면적"
+    area_title = t("area_title_dicom", lang) if is_dicom else t("area_title_mock", lang)
     uploaded_slices = uploads_by_case.setdefault(viewer_id, {}) if use_mock else {}
     case_notes = notes_by_case.setdefault(viewer_id, [])
     viewer_status = review_statuses.get(viewer_id, "검토 대기")
@@ -478,27 +571,27 @@ def render_viewer(viewer_id):
         move_to_slice(slice_key, st.session_state.get(slice_key, 1), total_slices)
         slice_number = st.session_state[slice_key]
 
-    display_name = case_display_name(case)
+    display_name = label_case_name(case, lang)
     render_app_bar(display_name)
 
     with st.container(horizontal=True, vertical_alignment="center", gap="medium"):
         st.button(
-            "케이스 목록",
+            t("back_to_list", lang),
             key="back_to_list",
             icon=":material/arrow_back:",
             type="tertiary",
             on_click=close_viewer,
             args=(viewer_id,),
         )
-        meta = str(case.get("exam") or "CT 검사")
+        meta = label_exam(str(case.get("exam") or "CT 검사"), lang)
         if not (registered_ct and dicom_error):
-            meta += f" · {total_slices} 단면"
+            meta += " · " + t("meta_slices", lang, count=total_slices)
         if measurement is not None and use_mock:
-            meta += " · 모의 측정값 있음"
+            meta += " · " + t("meta_mock_measurements", lang)
         st.html(
             '<div class="viewer-title">'
             '<div class="viewer-title-row">'
-            f'<h1 class="viewer-id">{escape(display_name)}</h1>{status_badge(viewer_status)}'
+            f'<h1 class="viewer-id">{escape(display_name)}</h1>{status_badge(viewer_status, lang)}'
             "</div>"
             f'<span class="caption">{escape(meta)}</span>'
             "</div>",
@@ -506,28 +599,30 @@ def render_viewer(viewer_id):
         )
 
         if use_mock:
-            with st.popover("현재 단면에 PNG 첨부", icon=":material/attach_file:"):
+            with st.popover(t("attach_png", lang), icon=":material/attach_file:"):
                 with st.form(f"attach_ct_{viewer_id}_{slice_number}", clear_on_submit=True):
-                    png_file = st.file_uploader("모의 CT PNG", type=["png"])
-                    attach_clicked = st.form_submit_button("첨부", type="primary")
+                    png_file = st.file_uploader(t("mock_ct_png", lang), type=["png"])
+                    attach_clicked = st.form_submit_button(t("attach_submit", lang), type="primary")
 
                 if attach_clicked:
                     if png_file is None:
-                        st.warning("첨부할 PNG를 선택해 주세요.")
+                        st.warning(t("attach_warning", lang))
                     else:
                         image_bytes = png_file.getvalue()
                         try:
                             with Image.open(BytesIO(image_bytes), formats=("PNG",)) as image:
                                 image.load()
                         except (OSError, SyntaxError, Image.DecompressionBombError):
-                            st.error("이미지를 읽을 수 없어요. 정상적인 PNG 파일을 선택해 주세요.")
+                            st.error(t("attach_invalid", lang))
                         else:
                             uploaded_slices[slice_number] = image_bytes
-                            st.success(f"{viewer_id}의 {slice_number}번 단면에 PNG를 첨부했어요.")
+                            st.success(
+                                t("attach_success", lang, case_id=viewer_id, slice_number=slice_number)
+                            )
 
         if viewer_status == "검토 대기":
             st.button(
-                "검토 시작",
+                t("start_review", lang),
                 key=f"start_review_{viewer_id}",
                 type="primary",
                 icon=":material/play_arrow:",
@@ -536,7 +631,7 @@ def render_viewer(viewer_id):
             )
         elif viewer_status == "검토 중":
             st.button(
-                "검토 완료",
+                t("complete_review", lang),
                 key=f"complete_review_{viewer_id}",
                 type="primary",
                 icon=":material/check:",
@@ -546,9 +641,9 @@ def render_viewer(viewer_id):
 
     if dicom_error:
         if registered_ct:
-            st.error(f"등록된 DICOM CT를 열 수 없어요. {dicom_error}")
+            st.error(t("dicom_open_error", lang, error=dicom_error))
             return
-        st.warning(f"원본 DICOM을 열 수 없어 모의 영상을 표시해요. {dicom_error}")
+        st.warning(t("dicom_fallback_warning", lang, error=dicom_error))
 
     uploaded_image = uploaded_slices.get(slice_number)
     original_bytes = uploaded_image
@@ -572,7 +667,7 @@ def render_viewer(viewer_id):
             if overlay_candidate.is_file():
                 overlay_path = overlay_candidate
         else:
-            image_error = f"표시할 이미지 파일: {file_name}"
+            image_error = f"{file_name}"
 
     ct_slice = analysis_slice.ct_slice if is_dicom else None
     source_kind = "dicom" if is_dicom else "mock"
@@ -589,8 +684,12 @@ def render_viewer(viewer_id):
         roi_key = f"{viewer_id}_mock_{slice_number}_{image_hash}"
 
     summary = build_measurement_summary(
-        case_id=viewer_id, slice_number=slice_number, source=source_kind,
-        ct_slice=ct_slice, image_sha256=image_hash, measurement=measurement,
+        case_id=viewer_id,
+        slice_number=slice_number,
+        source=source_kind,
+        ct_slice=ct_slice,
+        image_sha256=image_hash,
+        measurement=measurement,
     )
 
     overlay_slices = [
@@ -612,23 +711,29 @@ def render_viewer(viewer_id):
     stage_col, side_col = st.columns([2.75, 1], gap="medium")
 
     with stage_col.container(key="stage"):
-        source_label = SOURCE_LABELS[source_kind]
+        source_label = label_source(source_kind, lang)
         contour_chip = ""
         if show_dicom_contour:
-            contour_chip = '<span class="chip is-contour">종양 윤곽 켜짐</span>'
+            contour_chip = f'<span class="chip is-contour">{escape(t("contour_on_dicom", lang))}</span>'
         elif show_mock_contour:
-            contour_chip = '<span class="chip is-contour">종양 윤곽 표시 중</span>'
+            contour_chip = f'<span class="chip is-contour">{escape(t("contour_on_mock", lang))}</span>'
+        slice_prefix = escape(t("slice_prefix", lang))
         st.html(
             '<div class="stage-bar"><div class="stage-chips">'
-            f'<span class="chip is-strong">단면 {slice_number} / {total_slices}</span>'
-            f'<span class="chip">{source_label}</span>'
+            f'<span class="chip is-strong" data-slice-prefix="{slice_prefix}">{slice_prefix} {slice_number} / {total_slices}</span>'
+            f'<span class="chip">{escape(source_label)}</span>'
             f"</div>{contour_chip}</div>"
         )
 
         with st.container(key="stage_image"):
             if image_source is not None:
                 render_ct_viewport(
-                    image_source, viewer_id, slice_number, total_slices, dicom_slices,
+                    image_source,
+                    viewer_id,
+                    slice_number,
+                    total_slices,
+                    dicom_slices,
+                    lang=lang,
                     seg_source=seg_source if show_dicom_contour else None,
                     masks=tumor_masks if show_dicom_contour else None,
                 )
@@ -637,12 +742,12 @@ def render_viewer(viewer_id):
                     hint = escape(image_error)
                 elif case_images:
                     available = " · ".join(str(number) for number in sorted(case_images))
-                    hint = f"{available}번 단면에서 모의 CT를 볼 수 있어요. 이 단면에 PNG를 첨부할 수도 있어요."
+                    hint = escape(t("stage_empty_available", lang, available=available))
                 else:
-                    hint = "위의 ‘현재 단면에 PNG 첨부’로 모의 CT를 올려 보세요."
+                    hint = escape(t("stage_empty_upload", lang))
                 st.html(
                     '<div class="stage-empty">'
-                    f"<strong>{slice_number}번 단면에 표시할 영상이 없어요</strong>"
+                    f'<strong>{escape(t("stage_empty_title", lang, slice_number=slice_number))}</strong>'
                     f"<span>{hint}</span>"
                     "</div>"
                 )
@@ -653,13 +758,13 @@ def render_viewer(viewer_id):
                     "",
                     key=f"prev_slice_{viewer_id}",
                     icon=":material/chevron_left:",
-                    help="이전 단면",
+                    help=t("prev_slice", lang),
                     on_click=move_to_slice,
                     args=(slice_key, slice_number - 1, total_slices),
                     disabled=slice_number <= 1,
                 )
                 st.slider(
-                    "단면 번호",
+                    t("slice_slider_label", lang),
                     min_value=1,
                     max_value=total_slices,
                     key=slice_key,
@@ -670,7 +775,7 @@ def render_viewer(viewer_id):
                     "",
                     key=f"next_slice_{viewer_id}",
                     icon=":material/chevron_right:",
-                    help="다음 단면",
+                    help=t("next_slice", lang),
                     on_click=move_to_slice,
                     args=(slice_key, slice_number + 1, total_slices),
                     disabled=slice_number >= total_slices,
@@ -685,7 +790,7 @@ def render_viewer(viewer_id):
                     "is_current": number == slice_number,
                     "label": f"{number} · {area:.1f} cm²",
                 })
-            chart_key = f"area_chart_{viewer_id}_{slice_number}"
+            chart_key = f"area_chart_{viewer_id}_{slice_number}_{lang}"
 
             def move_to_selected_slice():
                 chart_selection = st.session_state[chart_key]["selection"]
@@ -709,8 +814,8 @@ def render_viewer(viewer_id):
                     format="d",
                     labelColor=STAGE_AXIS,
                     labelFont=MONO_FONT,
-                    labelFontSize=11,
-                    domainColor="#3A4542",
+                    labelFontSize=10.5,
+                    domainColor="#27272A",
                     ticks=False,
                     grid=False,
                     labelPadding=8,
@@ -727,30 +832,34 @@ def render_viewer(viewer_id):
             chart = (
                 alt.Chart(alt.Data(values=measurements))
                 .mark_bar(
-                    width=alt.ExprRef(expr=f"min(12, width / {slice_intervals} * 0.8)"),
-                    cornerRadiusTopLeft=6,
-                    cornerRadiusTopRight=6,
+                    width=alt.ExprRef(expr=f"min(11, width / {slice_intervals} * 0.78)"),
+                    cornerRadiusTopLeft=4,
+                    cornerRadiusTopRight=4,
                     cursor="pointer",
                 )
                 .encode(
                     x=x,
                     y=y,
-                    color=alt.condition("datum.is_current", alt.value(MINT), alt.value(TEAL_DIM)),
+                    color=alt.condition(
+                        "datum.is_current",
+                        alt.value(STAGE_ACTIVE),
+                        alt.value(STAGE_MUTED),
+                    ),
                     tooltip=[
-                        alt.Tooltip("slice_number:Q", title="단면"),
+                        alt.Tooltip("slice_number:Q", title=t("tooltip_slice", lang)),
                         alt.Tooltip("area_cm2:Q", title=f"{area_title} (cm²)", format=".1f"),
                     ],
                 )
                 .add_params(point_selection)
-                .properties(height=120, padding={"left": 56, "right": 56, "top": 8, "bottom": 4})
+                .properties(height=104, padding={"left": 48, "right": 48, "top": 6, "bottom": 4})
                 .configure(background=STAGE)
                 .configure_view(stroke=None)
             )
 
             st.html(
                 '<div class="stage-label">'
-                f"<strong>단면별 {area_title}</strong>"
-                "<span>슬라이더와 같은 가로축 · 막대를 누르면 그 단면으로 이동</span>"
+                f'<strong>{escape(t("area_chart_title", lang, area_title=area_title))}</strong>'
+                f'<span>{escape(t("area_chart_hint", lang))}</span>'
                 "</div>"
             )
             st.altair_chart(
@@ -761,7 +870,7 @@ def render_viewer(viewer_id):
                 width="stretch",
             )
             st.button(
-                f"최대 면적 단면 보기 · {max_area_slice}번",
+                t("max_area_button", lang, slice_number=max_area_slice),
                 key=f"max_area_slice_{viewer_id}",
                 on_click=move_to_slice,
                 args=(slice_key, max_area_slice, total_slices),
@@ -777,23 +886,23 @@ def render_viewer(viewer_id):
             )
             slice_caption = area_title
         else:
-            slice_value = '<span class="metric-value is-empty">측정값 없음</span>'
+            slice_value = f'<span class="metric-value is-empty">{escape(t("no_measurement", lang))}</span>'
             if is_dicom:
                 if measurement is not None:
-                    slice_caption = "이 단면에 SEG로 표시된 종양 영역이 없어요."
+                    slice_caption = t("no_seg_this_slice", lang)
                 elif seg_error:
                     slice_caption = seg_error
                 elif seg_source is None:
-                    slice_caption = "이 케이스에 연결된 DICOM SEG가 없어요."
+                    slice_caption = t("no_seg_connected", lang)
                 else:
-                    slice_caption = "SEG에 측정할 종양 영역이 없어요."
+                    slice_caption = t("empty_seg_mask", lang)
             elif uploaded_image is not None:
-                slice_caption = "첨부한 PNG에는 연결된 종양 측정값이 없어요."
+                slice_caption = t("uploaded_no_measurement", lang)
             elif areas_cm2:
                 measured = " · ".join(str(number) for number in sorted(areas_cm2))
-                slice_caption = f"{measured}번 단면에 측정값이 있어요"
+                slice_caption = t("measured_slices_hint", lang, slices=measured)
             else:
-                slice_caption = "이 케이스에는 모의 측정값이 없어요"
+                slice_caption = t("no_mock_measurements", lang)
 
         volume_ml = summary["tumor_volume_ml"]
         if volume_ml is None:
@@ -803,52 +912,54 @@ def render_viewer(viewer_id):
                 f'<span class="metric-value is-small">{volume_ml:.1f}'
                 '<span class="metric-unit">mL</span></span>'
             )
-        volume_caption = "전체 종양 부피" if is_dicom else "모의 전체 종양 부피 · 단면을 바꿔도 그대로"
+        volume_caption = t("volume_caption_dicom", lang) if is_dicom else t("volume_caption_mock", lang)
         volume_error = (
             f'<span class="metric-caption">{escape(measurement.volume_error)}</span>'
-            if measurement is not None and measurement.volume_error else ""
+            if measurement is not None and measurement.volume_error
+            else ""
         )
         st.html(
             '<div class="metric is-slice">'
-            f'<span class="overline"><span class="dot"></span>이 단면 · {slice_number} / {total_slices}</span>'
+            f'<span class="overline"><span class="dot"></span>'
+            f'{escape(t("this_slice_overline", lang, current=slice_number, total=total_slices))}</span>'
             f'{slice_value}<span class="metric-caption">{escape(slice_caption)}</span>'
             "</div>"
-            '<div class="metric" style="margin-top: 12px">'
-            '<span class="overline">케이스 전체</span>'
-            f'{case_value}<span class="metric-caption">{volume_caption}</span>{volume_error}'
+            '<div class="metric" style="margin-top: 10px">'
+            f'<span class="overline">{escape(t("whole_case_overline", lang))}</span>'
+            f'{case_value}<span class="metric-caption">{escape(volume_caption)}</span>{volume_error}'
             "</div>"
         )
 
         with st.container(border=True, key="card_display", gap="small"):
             contour_available = bool(tumor_masks) and not seg_error if is_dicom else overlay_path is not None
             with st.container(key="contour_row"):
-                st.toggle("종양 윤곽", key=contour_key, disabled=not contour_available)
+                st.toggle(t("contour_toggle", lang), key=contour_key, disabled=not contour_available)
             if seg_error:
                 contour_caption = seg_error
             elif is_dicom and tumor_mask is not None:
-                contour_caption = "이 단면의 SEG 종양 윤곽을 겹쳐 봅니다"
+                contour_caption = t("contour_caption_dicom", lang)
             elif is_dicom and tumor_masks:
-                contour_caption = "이 단면에는 종양 윤곽이 없어요"
+                contour_caption = t("contour_caption_dicom_none", lang)
             elif is_dicom and seg_source is None:
-                contour_caption = "이 케이스에 연결된 DICOM SEG가 없어요"
+                contour_caption = t("no_seg_connected", lang)
             elif is_dicom:
-                contour_caption = "이 SEG의 종양 마스크가 비어 있어요"
+                contour_caption = t("empty_seg_mask", lang)
             elif overlay_path is not None:
-                contour_caption = "이 단면의 모의 윤곽을 겹쳐 봅니다"
+                contour_caption = t("contour_caption_mock", lang)
             elif overlay_slices:
                 listed = " · ".join(str(number) for number in overlay_slices)
-                contour_caption = f"{listed}번 단면에서 쓸 수 있어요"
+                contour_caption = t("contour_caption_mock_available", lang, slices=listed)
             else:
-                contour_caption = "이 케이스에는 윤곽 오버레이가 없어요"
+                contour_caption = t("contour_caption_none", lang)
             st.html(f'<span class="caption">{escape(contour_caption)}</span>')
 
         st.html(
-            '<nav class="jump" aria-label="아래로 이어지는 도구">'
-            '<span class="overline">아래로 이어지는 도구</span>'
-            '<a href="#section-processing"><span><span class="mono">02</span>원본·처리 비교</span><span>↓</span></a>'
-            '<a href="#section-roi"><span><span class="mono">03</span>관심 영역(ROI) 분석</span><span>↓</span></a>'
-            '<a href="#section-summary"><span><span class="mono">04</span>현재 단면 측정 요약</span><span>↓</span></a>'
-            '<a href="#section-memo"><span><span class="mono">05</span>검토 메모</span><span>↓</span></a>'
+            f'<nav class="jump" aria-label="{escape(t("jump_overline", lang))}">'
+            f'<span class="overline">{escape(t("jump_overline", lang))}</span>'
+            f'<a href="#section-processing"><span><span class="mono">02</span>{escape(t("sec_02_title", lang))}</span><span>→</span></a>'
+            f'<a href="#section-roi"><span><span class="mono">03</span>{escape(t("sec_03_title", lang))}</span><span>→</span></a>'
+            f'<a href="#section-summary"><span><span class="mono">04</span>{escape(t("sec_04_title", lang))}</span><span>→</span></a>'
+            f'<a href="#section-memo"><span><span class="mono">05</span>{escape(t("sec_05_title", lang))}</span><span>→</span></a>'
             "</nav>"
         )
 
@@ -857,37 +968,33 @@ def render_viewer(viewer_id):
             st.html(
                 section_heading(
                     "02",
-                    "원본·처리 비교",
-                    "영상처리 도구를 바꿔 가며 원본과 결과를 나란히 봅니다",
+                    t("sec_02_title", lang),
+                    t("sec_02_desc", lang),
                     "section-processing",
                 ),
                 width="stretch",
             )
             compare_enabled = st.toggle(
-                "비교 열기",
+                t("toggle_compare", lang),
                 key=f"compare_processing_{viewer_id}",
                 disabled=original_bytes is None,
             )
 
         if original_bytes is None:
-            st.html('<div class="notice">이 단면에 영상이 있을 때 쓸 수 있어요.</div>')
+            st.html(f'<div class="notice">{escape(t("need_slice_image", lang))}</div>')
         elif compare_enabled:
             controls_column, images_column = st.columns([1, 2.6], gap="large")
 
             with controls_column:
                 use_brightness = st.checkbox(
-                    "기본 밝기 보정 사용",
+                    t("use_brightness", lang),
                     key=f"brightness_enabled_{viewer_id}",
                 )
                 method = st.radio(
-                    "영상처리 도구",
+                    t("processing_tool", lang),
                     PROCESSING_METHODS,
-                    captions=[
-                        "CT의 부분별 명암 차이를 강조해요.",
-                        "경계를 유지하면서 잔잔한 노이즈를 줄여요.",
-                        "밝기가 급격히 바뀌는 부분을 선으로 표시해요.",
-                        "SEG에서 서로 떨어진 영역을 구분해 면적을 살펴봐요.",
-                    ],
+                    format_func=lambda item: label_method(item, lang),
+                    captions=[method_caption(item, lang) for item in PROCESSING_METHODS],
                     disabled=use_brightness,
                     key=f"processing_method_algorithm_{viewer_id}",
                 )
@@ -904,7 +1011,7 @@ def render_viewer(viewer_id):
                     brightness_key = f"brightness_{viewer_id}"
                     st.session_state.setdefault(brightness_key, 1.0)
                     factor = st.slider(
-                        "밝기 배율",
+                        t("brightness_factor", lang),
                         min_value=0.5,
                         max_value=2.0,
                         step=0.1,
@@ -913,36 +1020,40 @@ def render_viewer(viewer_id):
                     )
                     scaled = original.astype(np.float32) * factor
                     result = np.clip(scaled, 0, 255).astype(np.uint8)
-                    st.html('<span class="caption">1.0으로 돌리면 원본과 같아요.</span>')
+                    st.html(f'<span class="caption">{escape(t("brightness_hint", lang))}</span>')
 
                 elif method == "CLAHE 대비 보정":
-                    st.slider("대비 제한값", 1.0, 5.0, 2.0, 0.1)
-                    st.select_slider("가로·세로 타일 수", options=[4, 8, 16], value=8)
+                    st.slider(t("clahe_clip", lang), 1.0, 5.0, 2.0, 0.1)
+                    st.select_slider(t("clahe_tile", lang), options=[4, 8, 16], value=8)
 
                 elif method == "양방향 필터":
-                    st.slider("밝기 차이 허용 정도", 1, 150, 50)
+                    st.slider(t("bilateral_sigma", lang), 1, 150, 50)
 
                 elif method == "Canny 경계 검출":
-                    st.slider("경계 임계값", 0, 255, (50, 150))
+                    st.slider(t("canny_thresh", lang), 0, 255, (50, 150))
 
                 elif method == "2D 연결 성분 분석":
-                    st.caption("현재 단면의 종양 SEG를 사용해 영역별 면적을 계산할 예정이에요.")
+                    st.caption(t("cc_caption", lang))
 
             with images_column:
                 original_column, result_column = st.columns(2, gap="medium")
                 with original_column.container(key="tile_original"):
                     st.image(original, width="stretch")
                     st.html(
-                        f'<div class="tile-caption"><span>원본 · 단면 {slice_number}</span>'
+                        '<div class="tile-caption">'
+                        f'<span>{escape(t("tile_original", lang, slice_number=slice_number))}</span>'
                         '<span class="mono">×1.0</span></div>'
                     )
                 with result_column.container(key="tile_result"):
-                    result_caption = f"<span>{method} 결과 · 단면 {slice_number}</span>"
+                    method_label = label_method(method, lang)
+                    result_caption = (
+                        f'<span>{escape(t("tile_result", lang, method=method_label, slice_number=slice_number))}</span>'
+                    )
                     if result is None:
-                        st.html('<div class="tile-empty">처리 함수를 연결한 뒤 결과가 표시돼요.</div>')
+                        st.html(f'<div class="tile-empty">{escape(t("tile_empty", lang))}</div>')
                     else:
                         st.image(result, width="stretch")
-                        result_caption += f'<span class="mono is-mint">×{factor:.1f}</span>'
+                        result_caption += f'<span class="mono is-accent">×{factor:.1f}</span>'
                     st.html(f'<div class="tile-caption">{result_caption}</div>')
 
     with st.container(border=True, key="card_roi", gap="medium"):
@@ -950,14 +1061,14 @@ def render_viewer(viewer_id):
             st.html(
                 section_heading(
                     "03",
-                    "관심 영역(ROI) 분석",
-                    "영역을 고르면 평균 밝기와 분포가 바로 갱신됩니다",
+                    t("sec_03_title", lang),
+                    t("sec_03_desc", lang),
                     "section-roi",
                 ),
                 width="stretch",
             )
             roi_enabled = st.toggle(
-                "분석 열기",
+                t("toggle_roi", lang),
                 key=f"show_roi_{viewer_id}",
                 disabled=original_bytes is None,
             )
@@ -970,14 +1081,15 @@ def render_viewer(viewer_id):
             gray = np.array(source.convert("L"))
 
         if original_bytes is None:
-            st.html('<div class="notice">이 단면에 영상이 있을 때 쓸 수 있어요.</div>')
+            st.html(f'<div class="notice">{escape(t("need_slice_image", lang))}</div>')
         elif roi_enabled:
             height, width = gray.shape
             mode_key = f"roi_mode_{viewer_id}"
             st.session_state.setdefault(mode_key, ROI_MODES[0])
             st.segmented_control(
-                "ROI 지정 방식",
+                t("roi_mode_label", lang),
                 ROI_MODES,
+                format_func=lambda item: label_roi_mode(item, lang),
                 key=mode_key,
                 on_change=keep_choice,
                 args=(mode_key, ROI_MODES[0]),
@@ -992,15 +1104,17 @@ def render_viewer(viewer_id):
                 default_y = saved_bounds[2:] if saved_bounds else (height // 4, height - height // 4)
                 st.session_state.setdefault(x_key, default_x)
                 st.session_state.setdefault(y_key, default_y)
-                x0, x1 = preview_column.slider("가로 범위 (x)", 0, width, key=x_key)
-                y0, y1 = preview_column.slider("세로 범위 (y)", 0, height, key=y_key)
+                x0, x1 = preview_column.slider(t("roi_x_range", lang), 0, width, key=x_key)
+                y0, y1 = preview_column.slider(t("roi_y_range", lang), 0, height, key=y_key)
                 raw_bounds = x0, x1, y0, y1
 
             roi_preview = preview_column.container(key="tile_roi")
             if mode == "영상에서 드래그":
                 with roi_preview:
                     raw_bounds = select_roi_by_drag(source, roi_key)
-                    st.html('<div class="tile-caption"><span>영상 위를 드래그해 상자를 그립니다</span></div>')
+                    st.html(
+                        f'<div class="tile-caption"><span>{escape(t("roi_drag_caption", lang))}</span></div>'
+                    )
 
             bounds = normalize_roi_bounds(raw_bounds, width, height)
             if raw_bounds is None:
@@ -1009,12 +1123,10 @@ def render_viewer(viewer_id):
                 roi_by_slice[roi_key] = bounds
 
             if bounds is None and raw_bounds is None:
-                stats_column.html(
-                    '<div class="notice">CT 위에서 드래그해 관심 영역을 선택해 주세요.</div>'
-                )
+                stats_column.html(f'<div class="notice">{escape(t("roi_prompt", lang))}</div>')
             elif bounds is None:
                 stats_column.html(
-                    '<div class="notice is-warning">가로와 세로 범위를 각각 한 픽셀 이상으로 골라 주세요.</div>'
+                    f'<div class="notice is-warning">{escape(t("roi_min_warning", lang))}</div>'
                 )
         if original_bytes is not None and bounds is not None:
             spacing = ct_slice.pixel_spacing_mm if ct_slice else None
@@ -1028,31 +1140,37 @@ def render_viewer(viewer_id):
                 if mode == "좌표 슬라이더" or raw_bounds is None:
                     preview = source.copy()
                     ImageDraw.Draw(preview).rectangle(
-                        (x0, y0, x1 - 1, y1 - 1), outline=MINT, width=3,
+                        (x0, y0, x1 - 1, y1 - 1),
+                        outline=STAGE_ACTIVE,
+                        width=3,
                     )
                     with roi_preview:
                         st.image(preview, width="stretch")
-                        st.html(f'<div class="tile-caption"><span>{slice_number}번 단면 · 선택한 ROI</span></div>')
+                        st.html(
+                            '<div class="tile-caption">'
+                            f'<span>{escape(t("roi_selected_caption", lang, slice_number=slice_number))}</span>'
+                            "</div>"
+                        )
 
                 histogram = pd.DataFrame({"brightness": np.arange(256), "pixels": counts})
                 bars = (
                     alt.Chart(histogram)
-                    .mark_area(interpolate="step-after", color=TEAL, opacity=0.85)
+                    .mark_area(interpolate="step-after", color=CHART_BAR, opacity=0.90)
                     .encode(
                         x=alt.X(
                             "brightness:Q",
-                            title="픽셀 밝기",
+                            title=t("axis_brightness", lang),
                             scale=alt.Scale(domain=[0, 255], nice=False),
                             axis=alt.Axis(values=[0, 64, 128, 192, 255], grid=False),
                         ),
                         y=alt.Y(
                             "pixels:Q",
-                            title="픽셀 수",
+                            title=t("axis_pixels", lang),
                             axis=alt.Axis(grid=True, tickCount=4, tickMinStep=1),
                         ),
                         tooltip=[
-                            alt.Tooltip("brightness:Q", title="밝기"),
-                            alt.Tooltip("pixels:Q", title="픽셀 수"),
+                            alt.Tooltip("brightness:Q", title=t("tooltip_brightness", lang)),
+                            alt.Tooltip("pixels:Q", title=t("tooltip_pixels", lang)),
                         ],
                     )
                 )
@@ -1064,34 +1182,36 @@ def render_viewer(viewer_id):
                 with stats_column.container(border=True, key="card_histogram", gap="small"):
                     st.html(
                         '<div class="roi-result-metrics">'
-                        f'<div>평균 밝기 <strong>{roi_mean:.1f}</strong></div>'
-                        f'<div>선택 크기 <strong>{x1 - x0} × {y1 - y0} px</strong>'
-                        f'<span>총 {pixel_count:,}픽셀</span></div>'
-                        '</div>'
+                        f'<div>{escape(t("roi_mean_label", lang))} <strong>{roi_mean:.1f}</strong></div>'
+                        f'<div>{escape(t("roi_size_label", lang))} <strong>{x1 - x0} × {y1 - y0} px</strong>'
+                        f'<span>{escape(t("roi_pixel_total", lang, count=pixel_count))}</span></div>'
+                        "</div>"
                         '<div class="roi-chart-heading">'
-                        '<strong>밝기 분포</strong>'
-                        '<span class="roi-mean-legend">평균</span>'
-                        '</div>'
+                        f'<strong>{escape(t("roi_hist_heading", lang))}</strong>'
+                        f'<span class="roi-mean-legend">{escape(t("roi_mean_legend", lang))}</span>'
+                        "</div>"
                     )
                     st.altair_chart(
-                        chart_axis_style(alt.layer(bars, mean_rule).properties(height=160)),
+                        chart_axis_style(alt.layer(bars, mean_rule).properties(height=156)),
                         theme=None,
                         width="stretch",
                     )
-                    with st.expander("ROI 상세정보"):
-                        st.caption(f"선택 범위 · x {x0}–{x1 - 1}, y {y0}–{y1 - 1}")
+                    with st.expander(t("roi_details_expander", lang)):
+                        st.caption(
+                            t("roi_bounds_caption", lang, x0=x0, x1=x1 - 1, y0=y0, y1=y1 - 1)
+                        )
                         if roi["area_mm2"] is not None:
-                            st.caption(f"사각형 ROI 면적 · {roi['area_mm2']:,.2f} mm²")
+                            st.caption(t("roi_area_caption", lang, area=roi["area_mm2"]))
 
     with st.container(border=True, key="card_measurement_summary", gap="medium"):
-        st.html(section_heading("04", "현재 단면 측정 요약", "", "section-summary"))
-        render_measurement_values(summary)
+        st.html(section_heading("04", t("sec_04_title", lang), "", "section-summary"))
+        render_measurement_values(summary, lang=lang)
         if original_bytes is None:
-            st.caption("영상이 있는 단면에서 측정값을 선택할 수 있어요.")
+            st.caption(t("summary_need_image", lang))
         has_values = any(summary[key] is not None for key in ("roi", "tumor_area_cm2", "tumor_volume_ml"))
         selected_by_case = st.session_state.setdefault("review_measurements", {})
         if st.button(
-            "검토 기록에 사용할 측정값 선택",
+            t("select_measurement_btn", lang),
             key=f"select_measurement_{viewer_id}",
             disabled=original_bytes is None or not has_values,
         ):
@@ -1099,16 +1219,18 @@ def render_viewer(viewer_id):
 
         selected = selected_by_case.get(viewer_id)
         if selected is not None:
-            with st.expander(f"검토 기록용 측정값 · {selected['slice_number']}번 단면"):
-                render_measurement_values(selected)
+            with st.expander(
+                t("saved_measurement_expander", lang, slice_number=selected["slice_number"])
+            ):
+                render_measurement_values(selected, lang=lang)
 
     with st.container(border=True, key="card_memo", gap="medium"):
         with st.container(horizontal=True, vertical_alignment="center"):
             st.html(
                 section_heading(
                     "05",
-                    "검토 메모",
-                    "저장하면 현재 단면 번호가 함께 남습니다",
+                    t("sec_05_title", lang),
+                    t("sec_05_desc", lang),
                     "section-memo",
                 ),
                 width="stretch",
@@ -1119,44 +1241,49 @@ def render_viewer(viewer_id):
 
         with compose_column:
             st.html(
-                '<div class="memo-head"><span class="caption">메모 내용</span>'
-                f'<span class="slice-tag">{slice_number}번 단면에 저장</span></div>'
+                '<div class="memo-head">'
+                f'<span class="caption">{escape(t("memo_content_label", lang))}</span>'
+                f'<span class="slice-tag">{escape(t("memo_slice_tag", lang, slice_number=slice_number))}</span>'
+                "</div>"
             )
             with st.form(f"review_note_{viewer_id}", clear_on_submit=True, border=False):
                 note = st.text_area(
-                    "메모 내용",
-                    placeholder="이 단면에서 확인한 내용을 적어 주세요",
-                    height=112,
+                    t("memo_content_label", lang),
+                    placeholder=t("memo_placeholder", lang),
+                    height=104,
                     label_visibility="collapsed",
                 )
-                submitted = st.form_submit_button("메모 저장", type="primary")
+                submitted = st.form_submit_button(t("memo_submit", lang), type="primary")
 
             if submitted:
                 note = note.strip()
                 if note:
                     case_notes.append({"slice_number": slice_number, "text": note})
-                    st.success("메모를 저장했어요.")
+                    st.success(t("memo_saved", lang))
                 else:
-                    st.warning("메모 내용을 입력해 주세요.")
+                    st.warning(t("memo_empty_warning", lang))
 
-        note_count_slot.html(f'<span class="caption mono">메모 {len(case_notes)}개</span>', width="content")
+        note_count_slot.html(
+            f'<span class="caption mono">{escape(t("memo_count", lang, count=len(case_notes)))}</span>',
+            width="content",
+        )
 
         with notes_column:
             if case_notes:
                 items = "".join(
                     "<li>"
-                    f'<span class="memo-slice">{saved_note["slice_number"]}번</span>'
+                    f'<span class="memo-slice">{escape(t("memo_slice_badge", lang, slice_number=saved_note["slice_number"]))}</span>'
                     f'<span class="memo-text">{escape(saved_note["text"])}</span>'
                     "</li>"
                     for saved_note in reversed(case_notes)
                 )
                 st.html(f'<ol class="memo-list">{items}</ol>')
-                st.html('<span class="caption">최근 저장한 메모가 위에 옵니다</span>')
+                st.html(f'<span class="caption">{escape(t("memo_order_caption", lang))}</span>')
             else:
                 st.html(
                     '<div class="empty">'
-                    '<span class="empty-title">아직 저장한 메모가 없어요</span>'
-                    '<span class="empty-desc">단면을 보며 확인한 내용을 왼쪽에 적어 저장해 보세요.</span>'
+                    f'<span class="empty-title">{escape(t("memo_empty_title", lang))}</span>'
+                    f'<span class="empty-desc">{escape(t("memo_empty_desc", lang))}</span>'
                     "</div>"
                 )
 

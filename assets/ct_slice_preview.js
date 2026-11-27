@@ -137,6 +137,43 @@ function installViewControls(root, caseId) {
   };
 }
 
+function applyLabels(root, labels) {
+  if (!labels) {
+    return;
+  }
+  const controls = root.querySelector(".ct-view-controls");
+  const zoomOut = root.querySelector('[data-view-action="zoom-out"]');
+  const zoomIn = root.querySelector('[data-view-action="zoom-in"]');
+  const reset = root.querySelector('[data-view-action="reset"]');
+  const readout = root.querySelector(".ct-view-controls output");
+  const viewport = root.querySelector(".ct-slice-preview");
+  const img = root.querySelector(".ct-view-content > img");
+
+  if (controls && labels.controlsAria) {
+    controls.setAttribute("aria-label", labels.controlsAria);
+  }
+  if (zoomOut) {
+    if (labels.zoomOut) zoomOut.textContent = labels.zoomOut;
+    if (labels.zoomOutAria) zoomOut.setAttribute("aria-label", labels.zoomOutAria);
+  }
+  if (zoomIn) {
+    if (labels.zoomIn) zoomIn.textContent = labels.zoomIn;
+    if (labels.zoomInAria) zoomIn.setAttribute("aria-label", labels.zoomInAria);
+  }
+  if (reset && labels.reset) {
+    reset.textContent = labels.reset;
+  }
+  if (readout && labels.readoutAria) {
+    readout.setAttribute("aria-label", labels.readoutAria);
+  }
+  if (viewport && labels.imageAria) {
+    viewport.setAttribute("aria-label", labels.imageAria);
+  }
+  if (img && labels.imageAlt) {
+    img.setAttribute("alt", labels.imageAlt);
+  }
+}
+
 export default function renderViewport({ parentElement, data }) {
   const image = parentElement.querySelector("img");
   const canvas = parentElement.querySelector("canvas");
@@ -145,6 +182,7 @@ export default function renderViewport({ parentElement, data }) {
   if (!stage) {
     return;
   }
+  applyLabels(parentElement, data.labels);
   const stopControls = installViewControls(parentElement, data.caseId);
 
   canvas.width = canvas.height = data.tileSize;
@@ -191,7 +229,8 @@ export default function renderViewport({ parentElement, data }) {
 
     const shown = preview ? requested : currentSlice;
     const label = stage.querySelector(".stage-chips .is-strong");
-    const text = `단면 ${shown} / ${data.sliceCount}`;
+    const prefix = label?.dataset?.slicePrefix || data.slicePrefix || "단면";
+    const text = `${prefix} ${shown} / ${data.sliceCount}`;
     if (shown > 0 && label && label.textContent !== text) {
       label.textContent = text;
     }
